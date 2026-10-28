@@ -109,6 +109,17 @@ describe('insync_get_message unread gate', () => {
     expect(transport.calls.some((call) => call.path.includes('GetMessageDetail'))).toBe(true);
   });
 
+  it('refuses to open the message when the unread listing was truncated and it was not seen', async () => {
+    const truncated = { ...LIST, recordsTotal: 500 };
+    const { get, transport } = rig((c) =>
+      c.path.includes('GetMessages') ? okJson(truncated) : okJson(DETAIL),
+    );
+    await expect(get('insync_get_message')({ child_id: 'C9', master_id: 'M9' })).rejects.toThrow(
+      /Could not confirm whether this message is unread: the unread folder has 500 messages and only 1/,
+    );
+    expect(transport.calls.every((call) => !call.path.includes('GetMessageDetail'))).toBe(true);
+  });
+
   it('opens an ALREADY-READ message (not in the unread list) without the flag', async () => {
     const emptyUnread = { recordsTotal: 0, UnreadMessagesCount: 0, data: [] };
     const { get } = rig((c) =>

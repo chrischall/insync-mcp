@@ -407,6 +407,57 @@ describe('InsyncClient write lookups', () => {
     ]);
   });
 
+  describe('unread lookup', () => {
+    const row = { TODOChildId: 11, TODOMasterId: 22, TaskSubject: 'x' };
+    const listing = (body: Record<string, unknown>) => client(() => ok(JSON.stringify(body)));
+
+    it('lists the unread folder (200 rows) and finds a row by its child and master ids', async () => {
+      const { c, t } = listing({ recordsTotal: 1, data: [row] });
+      expect(await c.isUnread('11', '22')).toBe(true);
+      expect(await c.findUnreadMessage('11', '22')).toEqual(row);
+      expect(t.calls[0]!.path).toMatch(/^Messages\/GetMessages\?/);
+      expect(t.calls[0]!.path).toContain('messageType=1');
+      expect(t.calls[0]!.path).toContain('length=200');
+    });
+
+    it('needs BOTH ids to match', async () => {
+      const { c } = listing({ recordsTotal: 1, data: [row] });
+      expect(await c.isUnread('11', '99')).toBe(false);
+      expect(await c.isUnread('99', '22')).toBe(false);
+    });
+
+    it('skips rows that are not records', async () => {
+      const { c } = listing({ recordsTotal: 3, data: [null, 5, row] });
+      expect(await c.isUnread('11', '22')).toBe(true);
+    });
+
+    it('answers false when the complete listing has no match', async () => {
+      const { c } = listing({ recordsTotal: 1, data: [row] });
+      expect(await c.isUnread('12', '22')).toBe(false);
+    });
+
+    it('treats a listing with no recordsTotal (or a non-numeric one) as complete', async () => {
+      expect(await listing({ data: [row] }).c.isUnread('12', '22')).toBe(false);
+      expect(await listing({ recordsTotal: 'many', data: [row] }).c.isUnread('12', '22')).toBe(false);
+      expect(await listing({}).c.isUnread('12', '22')).toBe(false);
+      expect(await client(() => ok('[]')).c.isUnread('12', '22')).toBe(false);
+    });
+
+    it('fails closed when the listing was truncated and no row matched', async () => {
+      const { c } = listing({ recordsTotal: '250', data: [row] });
+      await expect(c.isUnread('12', '22')).rejects.toMatchObject({
+        message:
+          'Could not confirm whether this message is unread: the unread folder has 250 messages and only 1 were checked.',
+        hint: expect.stringMatching(/allow_mark_read=true.*does not page/s),
+      });
+    });
+
+    it('still finds a match on a truncated listing', async () => {
+      const { c } = listing({ recordsTotal: 250, data: [row] });
+      expect(await c.isUnread('11', '22')).toBe(true);
+    });
+  });
+
   it('reads the cancellation-window check as a trimmed code', async () => {
     const { c, t } = client(() => ok(' 2\n'));
     expect(await c.checkCancelWindow('42')).toBe('2');

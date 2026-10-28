@@ -13,7 +13,7 @@ import { McpToolError, NonEmptyString, NumericIdString, defineWrite, registerWri
 import type { McpServer } from '@modelcontextprotocol/server';
 import type { InsyncClient } from '../client.js';
 import { htmlEscapeText, inputValue } from '../forms.js';
-import { READ, asRecord, asRecordArray, sameId } from './_shared.js';
+import { READ, asRecord, asRecordArray } from './_shared.js';
 import { WRITE, compactResult, sendOnce, writeDescription } from './_writes.js';
 
 /** The portal's own compose-screen disclaimer the user ticks before sending. */
@@ -212,11 +212,8 @@ export function registerComposeTools(server: McpServer, client: InsyncClient): v
       }),
       async plan({ child_id, master_id, body, subject, allow_mark_read }) {
         if (!allow_mark_read) {
-          const unread = await client.listMessages({ folder: 'unread', length: 200 });
-          const isUnread = asRecordArray(asRecord(unread).data).some(
-            (r) => sameId(r.TODOChildId, child_id) && sameId(r.TODOMasterId, master_id),
-          );
-          if (isUnread) {
+          // Throws (fails closed) when the unread folder is too long to tell.
+          if (await client.isUnread(child_id, master_id)) {
             throw new McpToolError('This message is unread; opening its reply form may mark it read.', {
               hint: 'The practice can see that. Re-call with allow_mark_read=true after the user agrees.',
             });

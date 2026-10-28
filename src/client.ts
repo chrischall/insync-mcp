@@ -124,6 +124,9 @@ function gridQuery(params: GridParams, extra: Record<string, string>): string {
  */
 const UNCONFIGURED_PORTAL_HOST = 'portal.insynchcs.com';
 
+/** Rows of the unread folder the unread gate reads in its one page. */
+const UNREAD_PAGE_SIZE = 200;
+
 export class InsyncClient {
   private readonly transport: InsyncTransport;
   private readonly scrubber: SecretScrubber;
@@ -470,6 +473,51 @@ export class InsyncClient {
   }
 
   // --- lookups the write tools read first (all side-effect free) ---
+
+  /**
+   * The unread-folder row for one message, or undefined when it is not unread.
+   * This is the gate that keeps a tool from opening — and so marking read — an
+   * unread message, so it fails CLOSED: one page of {@link UNREAD_PAGE_SIZE}
+   * rows is read, and when the portal's `recordsTotal` says the folder holds
+   * more than that page and no row matched, the answer is unknown, not "read",
+   * and this throws instead. Paging through the rest is deliberately not
+   * attempted. A listing with no numeric `recordsTotal` is taken as complete.
+   */
+  async findUnreadMessage(childId: string, masterId: string): Promise<Record<string, unknown> | undefined> {
+    // json() only hands back an object or an array; an array simply has no `data`.
+    const listing = (await this.listMessages({ folder: 'unread', length: UNREAD_PAGE_SIZE })) as Record<
+      string,
+      unknown
+    >;
+    const rows: unknown[] = Array.isArray(listing.data) ? listing.data : [];
+    // Compared as strings: the portal sends these ids as numbers, the tools take strings.
+    const match = rows.find(
+      (r): r is Record<string, unknown> =>
+        r !== null &&
+        typeof r === 'object' &&
+        String((r as Record<string, unknown>).TODOChildId) === childId &&
+        String((r as Record<string, unknown>).TODOMasterId) === masterId,
+    );
+    if (match !== undefined) return match;
+    const total = Number(listing.recordsTotal);
+    if (Number.isFinite(total) && total > rows.length) {
+      throw new McpToolError(
+        `Could not confirm whether this message is unread: the unread folder has ${total} messages ` +
+          `and only ${rows.length} were checked.`,
+        {
+          hint:
+            'Open the message in the portal, or re-call with allow_mark_read=true after the user ' +
+            'agrees. (This server does not page through the rest of the unread folder.)',
+        },
+      );
+    }
+    return undefined;
+  }
+
+  /** Whether one message is in the unread folder; throws when that cannot be told (see {@link findUnreadMessage}). */
+  async isUnread(childId: string, masterId: string): Promise<boolean> {
+    return (await this.findUnreadMessage(childId, masterId)) !== undefined;
+  }
 
   /** Compose recipients (`Resources[]`) and quick subjects — `GetComposeMessageDetail`. */
   async getComposeDetail(): Promise<unknown> {

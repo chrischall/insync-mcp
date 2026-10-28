@@ -336,9 +336,24 @@ export function registerSchedulingTools(server: McpServer, client: InsyncClient)
       }),
       async plan({ visit_id, reason }) {
         const upcoming = asRecord(await client.listAppointments('upcoming', { pageSize: 100 }));
-        const visit = asRecordArray(asRecord(upcoming.currentAppointment).Appointment).find((a) =>
-          sameId(a.VisitID, visit_id),
-        );
+        const current = asRecord(upcoming.currentAppointment);
+        const rows = asRecordArray(current.Appointment);
+        const visit = rows.find((a) => sameId(a.VisitID, visit_id));
+        // One page of 100 is read. When the portal says there are more and the
+        // visit was not on that page, "not upcoming" would be a guess — say what
+        // was actually checked instead. No numeric TotalRows: the page is the list.
+        const total = Number(current.TotalRows);
+        if (visit === undefined && Number.isFinite(total) && total > rows.length) {
+          throw new McpToolError(
+            `Could not find visit ${visit_id}: you have ${total} upcoming appointments and only ` +
+              `${rows.length} were checked.`,
+            {
+              hint:
+                'Check the visit id against insync_list_appointments (upcoming), or cancel it in ' +
+                'the portal. (This server does not page through the rest of the list.)',
+            },
+          );
+        }
         if (visit === undefined) {
           throw new McpToolError(`Visit ${visit_id} is not one of your upcoming appointments.`, {
             hint: 'Use a visit id from insync_list_appointments (upcoming).',

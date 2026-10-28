@@ -3,7 +3,7 @@ import { untrustedResult } from '@chrischall/mcp-utils';
 import { htmlToReadableText } from '@chrischall/mcp-utils/html';
 import type { McpServer } from '@modelcontextprotocol/server';
 import type { InsyncClient, MessageFolder } from '../client.js';
-import { READ, asRecord, asRecordArray, sameId, stripUrlishKeys, tidy } from './_shared.js';
+import { READ, asRecord, asRecordArray, stripUrlishKeys, tidy } from './_shared.js';
 import { ASSEMBLED_VIEWS, assembledViewArg, untrustedViewResponse } from '../view.js';
 import { WRITE } from './_writes.js';
 
@@ -115,10 +115,8 @@ export function registerMessageTools(server: McpServer, client: InsyncClient): v
     },
     async ({ child_id, master_id, allow_mark_read, view }) => {
       if (!allow_mark_read) {
-        const unread = await client.listMessages({ folder: 'unread', length: 200 });
-        const match = asRecordArray(asRecord(unread).data).find(
-          (r) => sameId(r.TODOChildId, child_id) && sameId(r.TODOMasterId, master_id),
-        );
+        // Throws (fails closed) when the unread folder is too long to tell.
+        const match = await client.findUnreadMessage(child_id, master_id);
         if (match !== undefined) {
           return untrustedResult(
             {
