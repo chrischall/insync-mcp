@@ -43,7 +43,64 @@
       }
     }
   },
-  "tools": [],
+  "tools": [
+    {
+      "name": "insync_get_counts",
+      "description": "Dashboard badge counts: unread messages, medications, allergies, problems, lab results, immunizations, and pending forms and surveys."
+    },
+    {
+      "name": "insync_get_balance",
+      "description": "Patient account balance: the amount owed (net due) and any credit balance."
+    },
+    {
+      "name": "insync_list_appointments",
+      "description": "Upcoming or past appointments/visits with date, time, provider, facility, visit type, status and expected copay."
+    },
+    {
+      "name": "insync_get_appointment_calendar",
+      "description": "Monthly appointment calendar: day, time slot and label of each scheduled visit in a date range (defaults to the current month)."
+    },
+    {
+      "name": "insync_list_medications",
+      "description": "Prescriptions/medications on file (current, discontinued or cancelled): drug, dispense, quantity, refills, days supply, date and prescriber."
+    },
+    {
+      "name": "insync_list_allergies",
+      "description": "The patient's recorded allergies and their reactions."
+    },
+    {
+      "name": "insync_list_messages",
+      "description": "Secure messages from the practice (unread, read or sent). Listing does not mark anything read. Returns the ids insync_get_message needs."
+    },
+    {
+      "name": "insync_get_message",
+      "description": "Read one secure message in full. NOT read-only: opening an UNREAD message marks it read unless allow_mark_read is confirmed; an already-read message opens freely."
+    },
+    {
+      "name": "insync_list_forms",
+      "description": "Patient intake/consent forms the practice sent (pending or all). Embedded form markup and login credentials are never returned."
+    },
+    {
+      "name": "insync_list_surveys",
+      "description": "Patient surveys the practice sent, with each survey's name and received date."
+    },
+    {
+      "name": "insync_list_documents",
+      "description": "Documents filed to the patient's portal account."
+    },
+    {
+      "name": "insync_get_profile",
+      "description": "The patient's demographic profile (scalar fields only). The photo, picklists and any credential-shaped field are never returned."
+    },
+    {
+      "name": "insync_list_refill_requests",
+      "description": "The patient's prescription refill-request history (grid rows with status and dates). Does not submit a refill."
+    },
+    {
+      "name": "insync_healthcheck",
+      "description": "Report portal connectivity from whichever transport is live: the server-side credential sign-in, or the browser bridge. Skipped when no credential resolves."
+    }
+  ],
   "user_config": {
     "insync_portal": {
       "type": "string",
