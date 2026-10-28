@@ -1,17 +1,16 @@
 // A by-value secret scrubber.
 //
 // `redactSecrets` (which runMcp applies to every thrown error) matches secret
-// SHAPES. The values this server must keep out of its output have no shape: a
-// password, and the practice-wide AWS S3 credentials the login response carries
-// (`S3AccessKeyID`, `S3SecretAccessKey`, `S3BucketName`, `S3RegionEndpoint`,
-// `S3PracticeFolderName`). The only way to keep those out of an error, a result
-// or a log is to scrub them BY VALUE — which is what this does, over
-// `@chrischall/mcp-utils`' `redactValues`.
+// SHAPES. The values this server must keep out of its output have no shape: the
+// account password, and the object-storage configuration the login response
+// carries. The only way to keep those out of an error, a result or a log is to
+// scrub them BY VALUE — which is what this does, over `@chrischall/mcp-utils`'
+// `redactValues`.
 //
-// The server never talks to S3 directly (file transfer goes through the
-// portal's own session-authorized endpoints), but it holds the creds on the
-// session so later file code can read them — and holding them is exactly why
-// they must be registered here the moment a login mints them.
+// The server never talks to object storage directly (file transfer goes through
+// the portal's own session-authorized endpoints), but it holds the config on the
+// session so later file code can read it — and holding it is exactly why these
+// values must be registered here the moment a login mints them.
 
 import { redactValues } from '@chrischall/mcp-utils';
 

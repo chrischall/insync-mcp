@@ -52,17 +52,15 @@ path.
 Selection is automatic: `server` when both credentials are set, otherwise
 `fetchproxy`. `INSYNC_TRANSPORT=server|fetchproxy` forces one.
 
-## The S3 credentials the login carries
+## Storage configuration is held, never used directly
 
-The `Login/userLogin` response includes **practice-wide AWS S3 credentials**
-(`S3AccessKeyID`, `S3SecretAccessKey`, `S3BucketName`, `S3RegionEndpoint`,
-`S3PracticeFolderName`). This server **never uses them to talk to S3 directly** —
-hitting the bucket would bypass the portal's per-patient authorization and could
-reach other patients' files. They are captured onto the session only so file
-tools behave correctly, and every one of those values is **scrubbed by value**
-from every tool result, error and log. All file transfer goes through the
-portal's own session-authorized endpoints, and a download URL is refused unless
-it stays on `*.insynchcs.com`.
+The login response carries some object-storage configuration. This server
+**never uses it to talk to object storage directly** — all file transfer goes
+through the portal's own session-authorized endpoints, so every read and write
+stays under the portal's per-patient authorization. Any such configuration is
+captured onto the session only, and is **scrubbed by value** from every tool
+result, error and log. A download URL is refused unless it stays on
+`*.insynchcs.com`.
 
 ## Insurance-card upload is unverified on the wire
 

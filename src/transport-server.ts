@@ -3,14 +3,14 @@
 //
 // Login (verified live 2026-10-28, no MFA):
 //   1. GET /                     → hidden `__RequestVerificationToken` + its cookie
-//   2. POST /Login/userLogin     → JSON { Status, url, S3*, … } + session cookies
+//   2. POST /Login/userLogin     → JSON { Status, url, … } + session cookies
 //      form: UserName=<lower>&Password=…&IsAzureAd=false&__RequestVerificationToken=…
 //      success is Status === 1 with a non-empty url (/Login/RedirectWithoutMessage).
 //   3. GET url (following redirects) then GET /Dashboard to confirm the session.
 //
-// The userLogin JSON also carries a password hash, an ePrescription token and
-// the practice S3 creds — only the whitelisted fields are read, and the S3
-// values + password are registered with the scrubber so they never surface.
+// Only a whitelist of fields is read from that JSON; the account password and
+// any sensitive configuration it carries are registered with the scrubber so
+// they never surface in a result, error or log.
 //
 // A rejected login (Status 0/2/3/5) is NEVER retried: attempts count toward an
 // account lockout. It is thrown as a PermanentTransportError, which the session

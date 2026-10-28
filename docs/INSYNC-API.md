@@ -218,11 +218,11 @@ PatientDetail.*Password* / *Hash* / *Token*  # credential-shaped keys — droppe
 > wire. Re-confirm against a real file when one exists.
 
 All file transfer goes through the portal's **own session-authorized
-endpoints** — never direct object storage. The login response carries
-practice-wide AWS S3 credentials, but this server never uses them to talk to S3:
-hitting the bucket directly would bypass per-patient authorization. Those values
-are held server-side and scrubbed from every result, error and log. A download
-target URL is refused unless it stays on `*.insynchcs.com`.
+endpoints** — never direct object storage. The login response carries some
+object-storage configuration, but this server never uses it to talk to storage
+directly; doing so would sidestep the portal's per-patient authorization. Any
+such values are held server-side and scrubbed from every result, error and log.
+A download target URL is refused unless it stays on `*.insynchcs.com`.
 
 ### Message attachments
 
