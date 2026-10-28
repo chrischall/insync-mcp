@@ -4,7 +4,7 @@
   "name": "insync-mcp",
   "display_name": "InSync Patient Portal",
   "version": "0.1.0",
-  "description": "Read an InSync Healthcare (Qualifacts) patient portal — appointments, medications, allergies, messages, forms and balance — by signing in server-side with your portal password, or by relaying through your signed-in browser tab.",
+  "description": "Use an InSync Healthcare (Qualifacts) patient portal — appointments, medications, allergies, messages, forms and balance, plus confirm-gated messages, refill, appointment and cancellation requests — by signing in server-side with your portal password, or by relaying through your signed-in browser tab.",
   "author": {
     "name": "Chris Chall",
     "email": "chris.c.hall@gmail.com",
@@ -113,6 +113,38 @@
     {
       "name": "insync_upload_insurance_card",
       "description": "Upload a photo of your insurance card (front, back, or both) to your own InSync profile, from a local JPG/JPEG/PNG file. Writes to the portal and is irreversible, so it is confirm-gated: the first call returns a preview and a confirmToken, and only a repeat call with that token uploads."
+    },
+    {
+      "name": "insync_list_message_recipients",
+      "description": "List the practice groups you can send a secure message to (with their group ids) and the practice's suggested subjects. Changes nothing."
+    },
+    {
+      "name": "insync_send_message",
+      "description": "Send a new secure message to a practice group. The practice receives it and it cannot be unsent, so it is confirm-gated: the first call returns a preview and a confirmToken, and only a repeat call with that token sends."
+    },
+    {
+      "name": "insync_reply_message",
+      "description": "Reply to a secure message from your practice. Confirm-gated (preview + confirmToken) and cannot be unsent; an unread message is refused unless allow_mark_read is confirmed."
+    },
+    {
+      "name": "insync_get_refill_options",
+      "description": "List the medications a refill can be requested for (with medication ids) and the provider the request goes to. Changes nothing."
+    },
+    {
+      "name": "insync_request_refill",
+      "description": "Request a refill of one or more current medications from your practice. Confirm-gated (preview + confirmToken); the practice receives the request and it cannot be withdrawn here."
+    },
+    {
+      "name": "insync_find_appointment_slots",
+      "description": "Find open appointment-request slots on a date: facilities, bookable providers, visit types and open times. Changes nothing."
+    },
+    {
+      "name": "insync_request_appointment",
+      "description": "Request an appointment in an open slot. Confirm-gated (preview + confirmToken); it is a request the practice confirms, and it cannot be withdrawn here."
+    },
+    {
+      "name": "insync_cancel_appointment",
+      "description": "Ask the practice to cancel an upcoming appointment, with a reason. Confirm-gated (preview + confirmToken); the practice reviews the request, and it is refused once the cancellation period has passed."
     },
     {
       "name": "insync_healthcheck",

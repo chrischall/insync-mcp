@@ -25,6 +25,9 @@ import { registerInsyncHealthcheckTool } from './tools/healthcheck.js';
 import { registerMessageTools } from './tools/messages.js';
 import { registerProfileTools } from './tools/profile.js';
 import { registerUploadTools, uploadRoots } from './tools/uploads.js';
+import { registerComposeTools } from './tools/compose.js';
+import { registerRefillTools } from './tools/refills.js';
+import { registerSchedulingTools } from './tools/scheduling.js';
 import { DEFAULT_PORT, FetchproxyTransport } from './transport-fetchproxy.js';
 import { ServerTransport } from './transport-server.js';
 import { parsePortal, type InsyncTransport } from './transport.js';
@@ -91,6 +94,9 @@ await runMcp({
     (server) => registerProfileTools(server, client),
     (server) => registerDownloadTools(server, client, downloadIO),
     (server) => registerUploadTools(server, client, { allowedRoots: uploadRoots() }),
+    (server) => registerComposeTools(server, client),
+    (server) => registerRefillTools(server, client),
+    (server) => registerSchedulingTools(server, client),
     (server) => registerInsyncHealthcheckTool(server, client, host, { bridge, credentialsConfigured }),
   ],
 });

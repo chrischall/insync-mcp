@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { InsyncClient, isSignedOut, type TransportMode } from '../src/client.js';
+import { WriteOutcomeUnknownError } from '@chrischall/mcp-utils';
+import { InsyncClient, InsyncNotSignedInError, isSignedOut, type TransportMode } from '../src/client.js';
 import { SecretScrubber } from '../src/secrets.js';
 import type {
   BinaryFetchResult,
@@ -318,5 +319,151 @@ describe('InsyncClient file transfer', () => {
     const res = await c.downloadFile('/srv/doc');
     expect(Buffer.from(res.bytes).toString()).toBe('DOC');
     expect(t.calls[0]).toMatchObject({ verb: 'postBinary', path: 'PatientDocument/GetFile', body: { FilePath: '/srv/doc' } });
+  });
+});
+
+describe('InsyncClient write lookups', () => {
+  it('reads the compose recipients, compose form and refill form', async () => {
+    const { c, t } = client((call) => ok(call.verb === 'getJson' ? '{"Resources":[]}' : '<form></form>'));
+    expect(await c.getComposeDetail()).toEqual({ Resources: [] });
+    expect(await c.getComposeForm()).toBe('<form></form>');
+    expect(await c.getRefillForm()).toBe('<form></form>');
+    expect(await c.getSchedulerPage()).toBe('<form></form>');
+    expect(t.calls.map((x) => [x.verb, x.path])).toEqual([
+      ['getJson', 'Messages/GetComposeMessageDetail'],
+      ['getText', 'Messages/LoadComposeMessageDetail?IsPriorityEnable=false'],
+      ['getText', 'RefillPrescription/RefillPrescription'],
+      ['getText', 'PatientScheduler'],
+    ]);
+  });
+
+  it('posts the reply form request with the ids as JSON Mstparams', async () => {
+    const { c, t } = client(() => ok('<form></form>'));
+    await c.getReplyForm('11', '22');
+    expect(t.calls[0]).toMatchObject({
+      verb: 'postForm',
+      path: 'Messages/GetComposeDetailForReply',
+      body: { Mstparams: '{"TODOChildId":"11","TODOMasterId":"22"}' },
+    });
+  });
+
+  it('builds the scheduling lookups the portal’s Angular service sends', async () => {
+    const { c, t } = client(() => ok('{}'));
+    await c.listRequestFacilities('7');
+    await c.listRequestProviders('3', '11/20/2026');
+    await c.listRequestVisitTypes({ scheduleSetupId: '5', date: '11/20/2026', facilityId: '3' });
+    await c.listRequestSlots({
+      scheduleSetupId: '5',
+      date: '11/20/2026',
+      currentTime: '10/28/2026 04:00 PM',
+      resourceId: '9',
+      visitTypeId: '',
+    });
+    expect(t.calls.map((x) => [x.verb, x.path, x.body])).toEqual([
+      ['postForm', 'PatientScheduler/BindFacilities?practiceId=7', {}],
+      [
+        'postForm',
+        'PatientScheduler/BindProviders?facilityId=3&date=11%2F20%2F2026&GenderIds=&LanguageIds=&ServiceOfferedIds=&CredentialIds=',
+        {},
+      ],
+      [
+        'postJson',
+        'PatientScheduler/GetSchedulerVisitTypeSlots',
+        { VisitDate: '11/20/2026', ScheduleSetupID: '5', SpCalledFrom: 1, FacilityId: '3' },
+      ],
+      [
+        'postForm',
+        'PatientScheduler/BindSchedulerSlots?providerId=5&date=11%2F20%2F2026&currentTime=10%2F28%2F2026+04%3A00+PM&ResourceId=9&EncounterTypeID=',
+        {},
+      ],
+    ]);
+  });
+
+  it('reads the cancellation-window check as a trimmed code', async () => {
+    const { c, t } = client(() => ok(' 2\n'));
+    expect(await c.checkCancelWindow('42')).toBe('2');
+    expect(t.calls[0]).toMatchObject({
+      verb: 'getText',
+      path: 'Appointment/CheckCancelAppointmentRequestTimeDuration?VisitID=42',
+    });
+  });
+});
+
+describe('InsyncClient writes', () => {
+  const withToken = (answer: FetchResult) => (call: Call): FetchResult =>
+    call.path.endsWith('GetAntiForgeryToken') ? ok('{"formToken":"tok"}') : answer;
+
+  it('submits a form once, never replayed, with a fresh anti-forgery token', async () => {
+    const { c, t } = client(withToken(ok('')));
+    expect(await c.submitForm('Appointment/SaveCancelAppointmentRequest', { VisitID: '1' })).toBe('');
+    expect(t.calls[1]).toEqual({
+      verb: 'postForm',
+      path: 'Appointment/SaveCancelAppointmentRequest',
+      body: { VisitID: '1', __RequestVerificationToken: 'tok' },
+      opts: { replay: false, headers: { __RequestVerificationToken: 'tok' } },
+    });
+  });
+
+  it('sends URLSearchParams untouched when the portal yields no token', async () => {
+    const { c, t } = client((call) => (call.path.endsWith('GetAntiForgeryToken') ? ok('{}') : ok('')));
+    await c.submitForm('X/Y', new URLSearchParams([['a', '1']]));
+    expect([...(t.calls[1]!.body as URLSearchParams)]).toEqual([['a', '1']]);
+    expect(t.calls[1]!.opts).toEqual({ replay: false, headers: {} });
+  });
+
+  it('accepts URLSearchParams for nested-array forms', async () => {
+    const { c, t } = client(withToken(ok('ok')));
+    const form = new URLSearchParams([['list[0][A]', '1']]);
+    await c.submitForm('X/Y', form);
+    const sent = t.calls[1]!.body as URLSearchParams;
+    expect(sent.get('list[0][A]')).toBe('1');
+    expect(sent.get('__RequestVerificationToken')).toBe('tok');
+  });
+
+  it('refuses a signed-out answer or a 4xx as not applied', async () => {
+    await expect(client(withToken(ok(LOGIN))).c.submitForm('X/Y', {})).rejects.toThrow(/not signed in/i);
+    const refused = client(withToken({ status: 400, body: '' })).c.submitForm('X/Y', {});
+    await expect(refused).rejects.toThrow(/refused X\/Y with HTTP 400/);
+    await expect(refused).rejects.not.toBeInstanceOf(WriteOutcomeUnknownError);
+  });
+
+  it('reports a 5xx or a transport failure after sending as an UNKNOWN outcome', async () => {
+    const five = client(withToken({ status: 502, body: '' })).c.submitForm('X/Y', {});
+    await expect(five).rejects.toBeInstanceOf(WriteOutcomeUnknownError);
+    await expect(five).rejects.toMatchObject({ hint: expect.stringMatching(/HTTP 502/) });
+    const dropped = client((call) => {
+      if (call.path.endsWith('GetAntiForgeryToken')) return ok('{}');
+      throw new TypeError('fetch failed');
+    });
+    await expect(dropped.c.submitForm('X/Y', {})).rejects.toBeInstanceOf(WriteOutcomeUnknownError);
+    const signedOut = client(() => {
+      throw new InsyncNotSignedInError('server');
+    });
+    await expect(signedOut.c.submitJson('X/Y', {})).rejects.toBeInstanceOf(InsyncNotSignedInError);
+  });
+
+  it('submits a form and parses a JSON answer', async () => {
+    const { c } = client(withToken(ok('{"Result":[{"Status":1}]}')));
+    expect(await c.submitFormJson('Messages/ComposeEmail', { a: '1' })).toEqual({ Result: [{ Status: 1 }] });
+    await expect(client(withToken({ status: 404, body: '' })).c.submitFormJson('X/Y', {})).rejects.toThrow(
+      /HTTP 404/,
+    );
+  });
+
+  it('submits JSON once, never replayed, and parses the answer', async () => {
+    const { c, t } = client(() => ok('{"resultModel":{"Status":1}}'));
+    expect(await c.submitJson('PatientScheduler/SaveAppointmentReq', { A: 1 })).toEqual({
+      resultModel: { Status: 1 },
+    });
+    expect(t.calls[0]).toEqual({
+      verb: 'postJson',
+      path: 'PatientScheduler/SaveAppointmentReq',
+      body: { A: 1 },
+      opts: { replay: false },
+    });
+    await expect(client(() => ({ status: 500, body: '{}' })).c.submitJson('X/Y', {})).rejects.toBeInstanceOf(
+      WriteOutcomeUnknownError,
+    );
+    await expect(client(() => ok(LOGIN)).c.submitJson('X/Y', {})).rejects.toThrow(/not signed in/i);
   });
 });

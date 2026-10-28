@@ -10,7 +10,7 @@
 // moves bytes. Secret values (the password, the S3 creds) are scrubbed from
 // every error it raises.
 
-import { McpToolError } from '@chrischall/mcp-utils';
+import { McpToolError, WriteOutcomeUnknownError } from '@chrischall/mcp-utils';
 import { SecretScrubber } from './secrets.js';
 import type { BinaryFetchResult, FetchResult, InsyncTransport, S3Config } from './transport.js';
 
@@ -343,15 +343,7 @@ export class InsyncClient {
    * Derived from the portal JS, UNVERIFIED on the wire — see docs/INSYNC-API.md.
    */
   async upload(path: string, form: Record<string, string>): Promise<{ status?: string }> {
-    const token = await this.antiForgeryToken();
-    const body: Record<string, string> = { ...form };
-    const headers: Record<string, string> = {};
-    if (token !== undefined) {
-      body.__RequestVerificationToken = token;
-      headers.__RequestVerificationToken = token;
-    }
-    const res = await this.transport.postForm(path, body, { replay: false, headers });
-    const data = this.json<Record<string, unknown>>(res, path);
+    const data = this.json<Record<string, unknown>>(await this.sendForm(path, form), path);
     // The portal's success signal differs by handler: the insurance-card save
     // reads `Success`, other saves read `Status == "1"`. Accept either.
     const accepted = data.Success === true || String(data.Status) === '1';
@@ -363,6 +355,199 @@ export class InsyncClient {
       );
     }
     return { status: data.Status !== undefined ? String(data.Status) : undefined };
+  }
+
+  /**
+   * POST a write form exactly once: a fresh anti-forgery token is attached (as a
+   * field and the `__RequestVerificationToken` header, when the portal yields
+   * one) and the transport is forbidden to re-login and replay it. Only the
+   * signed-out check happens here; judging accept/reject is the caller's.
+   */
+  private async sendForm(
+    path: string,
+    form: Record<string, string> | URLSearchParams,
+  ): Promise<FetchResult> {
+    const token = await this.antiForgeryToken();
+    const headers: Record<string, string> = {};
+    let body: Record<string, string> | URLSearchParams;
+    if (form instanceof URLSearchParams) {
+      body = new URLSearchParams(form);
+      if (token !== undefined) body.set('__RequestVerificationToken', token);
+    } else {
+      body = { ...form };
+      if (token !== undefined) body.__RequestVerificationToken = token;
+    }
+    if (token !== undefined) headers.__RequestVerificationToken = token;
+    const res = await this.sent(() => this.transport.postForm(path, body, { replay: false, headers }));
+    if (isSignedOut(res)) throw new InsyncNotSignedInError(this.mode);
+    return res;
+  }
+
+  /**
+   * Run a write's request. A failure that is not already a tool error (a
+   * timeout, a dropped connection) happened AFTER the request may have reached
+   * the portal, so it is reported as {@link WriteOutcomeUnknownError} — never as
+   * a plain error that reads as "safe to retry".
+   */
+  private async sent(run: () => Promise<FetchResult>): Promise<FetchResult> {
+    try {
+      return await run();
+    } catch (err) {
+      if (err instanceof McpToolError) throw err;
+      throw new WriteOutcomeUnknownError('InSync', 'POST', { cause: err });
+    }
+  }
+
+  /**
+   * Judge a write's HTTP status: a 4xx is the portal refusing it (nothing
+   * applied); a 5xx is no proof either way — a backend can fail after
+   * committing — so it is {@link WriteOutcomeUnknownError}.
+   */
+  private assertWriteStatus(res: FetchResult, path: string): void {
+    if (res.status >= 500) {
+      throw new WriteOutcomeUnknownError('InSync', 'POST', {
+        hint:
+          `InSync answered ${path} with HTTP ${res.status}, so the write may or may not have ` +
+          'happened. Re-read the matching list before retrying; do not resend blindly.',
+      });
+    }
+    if (res.status >= 400) {
+      throw this.fail(
+        `InSync refused ${path} with HTTP ${res.status}.`,
+        'Nothing was applied. The request shape may have changed; see docs/INSYNC-API.md.',
+      );
+    }
+  }
+
+  /**
+   * Submit a write form once (see {@link sendForm}) and return the raw body.
+   * Several portal saves answer with an empty body or an HTML fragment and judge
+   * success only by the HTTP status, so the body is left to the tool to read.
+   */
+  async submitForm(path: string, form: Record<string, string> | URLSearchParams): Promise<string> {
+    const res = await this.sendForm(path, form);
+    this.assertWriteStatus(res, path);
+    return res.body;
+  }
+
+  /** Submit a write form once (see {@link sendForm}) and parse its JSON answer. */
+  async submitFormJson(
+    path: string,
+    form: Record<string, string> | URLSearchParams,
+  ): Promise<Record<string, unknown>> {
+    const res = await this.sendForm(path, form);
+    this.assertWriteStatus(res, path);
+    return this.json<Record<string, unknown>>(res, path);
+  }
+
+  /** Submit a JSON write once, never replayed, and parse the JSON answer. */
+  async submitJson(path: string, body: unknown): Promise<Record<string, unknown>> {
+    const res = await this.sent(() => this.transport.postJson(path, body, { replay: false }));
+    if (isSignedOut(res)) throw new InsyncNotSignedInError(this.mode);
+    this.assertWriteStatus(res, path);
+    return this.json<Record<string, unknown>>(res, path);
+  }
+
+  // --- lookups the write tools read first (all side-effect free) ---
+
+  /** Compose recipients (`Resources[]`) and quick subjects — `GetComposeMessageDetail`. */
+  async getComposeDetail(): Promise<unknown> {
+    const path = 'Messages/GetComposeMessageDetail';
+    return this.json(await this.transport.getJson(path), path);
+  }
+
+  /** The compose partial view; the tool reads its server-stamped `ReminderDate`. */
+  async getComposeForm(): Promise<string> {
+    const path = 'Messages/LoadComposeMessageDetail?IsPriorityEnable=false';
+    return this.text(await this.transport.getText(path), path);
+  }
+
+  /**
+   * The reply partial view for one message: its hidden ids, reply-to group,
+   * quoted history and prefilled subject. Verified side-effect free on a READ
+   * message (the unread count did not move); the tool still refuses an unread one.
+   */
+  async getReplyForm(childId: string, masterId: string): Promise<string> {
+    const path = 'Messages/GetComposeDetailForReply';
+    const Mstparams = JSON.stringify({ TODOChildId: childId, TODOMasterId: masterId });
+    return this.text(await this.transport.postForm(path, { Mstparams }), path);
+  }
+
+  /** The refill-request page: its medication and provider pick lists. */
+  async getRefillForm(): Promise<string> {
+    const path = 'RefillPrescription/RefillPrescription';
+    return this.text(await this.transport.getText(path), path);
+  }
+
+  /** The scheduler page: carries the hidden `PracticeID` the facility lookup needs. */
+  async getSchedulerPage(): Promise<string> {
+    const path = 'PatientScheduler';
+    return this.text(await this.transport.getText(path), path);
+  }
+
+  async listRequestFacilities(practiceId: string): Promise<unknown> {
+    const endpoint = 'PatientScheduler/BindFacilities';
+    const query = new URLSearchParams({ practiceId }).toString();
+    return this.json(await this.transport.postForm(`${endpoint}?${query}`, {}), endpoint);
+  }
+
+  /** Providers bookable at a facility on a date (`MM/DD/YYYY`). The filters are left blank. */
+  async listRequestProviders(facilityId: string, date: string): Promise<unknown> {
+    const endpoint = 'PatientScheduler/BindProviders';
+    const query = new URLSearchParams({
+      facilityId,
+      date,
+      GenderIds: '',
+      LanguageIds: '',
+      ServiceOfferedIds: '',
+      CredentialIds: '',
+    }).toString();
+    return this.json(await this.transport.postForm(`${endpoint}?${query}`, {}), endpoint);
+  }
+
+  /** The visit types a provider's schedule offers on a date. `SpCalledFrom` is the page's fixed `1`. */
+  async listRequestVisitTypes(args: {
+    scheduleSetupId: string;
+    date: string;
+    facilityId: string;
+  }): Promise<unknown> {
+    const path = 'PatientScheduler/GetSchedulerVisitTypeSlots';
+    const body = {
+      VisitDate: args.date,
+      ScheduleSetupID: args.scheduleSetupId,
+      SpCalledFrom: 1,
+      FacilityId: args.facilityId,
+    };
+    return this.json(await this.transport.postJson(path, body), path);
+  }
+
+  /**
+   * A provider's time slots on a date. The portal passes the schedule-setup id
+   * as `providerId` and the provider's resource id as `ResourceId`.
+   */
+  async listRequestSlots(args: {
+    scheduleSetupId: string;
+    date: string;
+    currentTime: string;
+    resourceId: string;
+    visitTypeId: string;
+  }): Promise<unknown> {
+    const endpoint = 'PatientScheduler/BindSchedulerSlots';
+    const query = new URLSearchParams({
+      providerId: args.scheduleSetupId,
+      date: args.date,
+      currentTime: args.currentTime,
+      ResourceId: args.resourceId,
+      EncounterTypeID: args.visitTypeId,
+    }).toString();
+    return this.json(await this.transport.postForm(`${endpoint}?${query}`, {}), endpoint);
+  }
+
+  /** The cancellation-window check: `"2"` means the period has passed (verified `"0"` = allowed). */
+  async checkCancelWindow(visitId: string): Promise<string> {
+    const endpoint = 'Appointment/CheckCancelAppointmentRequestTimeDuration';
+    const query = new URLSearchParams({ VisitID: visitId }).toString();
+    return this.text(await this.transport.getText(`${endpoint}?${query}`), endpoint).trim();
   }
 
   /**

@@ -329,3 +329,167 @@ The write goes out once and is never replayed on a lapsed session.
 **Verification-after-write** (for the later live test, documented not executed):
 re-read the insurance details rather than trusting the save's `Status`/`Success`
 alone, since the response is unverified.
+
+## Messages, refill, appointment and cancellation requests (T6)
+
+> **Provenance:** every **lookup** below was **verified live, read-only**
+> (2026-10-28, owner's practice; the unread count did not move across the reply
+> form load). Every **send** is **derived from the portal JS** —
+> `_bundles_Revamp_messagesScript`, `_bundles_Revamp_refillPrescriptionScript`,
+> `_JS_AppointmentBundle` — and the cancel partial view's inline script, and is
+> **UNVERIFIED on the wire**: no automated run sends one, because each reaches
+> the practice. Re-confirm each success signal on an owner-supervised send.
+
+All five sends are `readOnly:false, destructive:true`, gated by `confirmWrite`
+through `defineWrite` / `registerWrite`, go out exactly once (`replay: false`),
+and attach a fresh anti-forgery token to the form posts (as for the upload). A
+5xx or a dropped connection after sending is `WriteOutcomeUnknownError`, which
+the tools report as `status: "unknown"` (check the named list before retrying);
+a 4xx is a refusal (nothing applied).
+
+### Compose — `insync_list_message_recipients`, `insync_send_message`
+
+`GET Messages/GetComposeMessageDetail` (verified):
+
+```
+Resources[].UserGroupID   # -> recipients[].groupId
+Resources[].GroupName     # -> recipients[].name
+Subjects[]                # -> subjects (the practice's quick subjects)
+PatientSignatureDetail.*  # signature / priority flags — not used
+```
+
+`GET Messages/LoadComposeMessageDetail?IsPriorityEnable=false` (verified) — the
+compose partial. Its `#ReminderDate` input carries the server-stamped send time
+(`MM/DD/YYYY h:mm:00 AM`); it is read at send time and is not bound into the
+token. `#ddlToUser` is a single select. The disclaimer the UI requires ticking
+is shown in the preview.
+
+`POST Messages/ComposeEmail` — form-urlencoded, one field holding JSON:
+
+```
+objToDoNew = JSON {
+  TODOMasterId: 0, TaskSubject, TaskMessage,
+  IsImportant: "false", IsImportantColor: "",
+  ToGroupIds: "<groupId>", ToGroupName: "<group name>",
+  _setPatientSignature: false, _setPatientSignaturepath: "",
+  ReminderDate: "<from the compose partial>", AttachmentFileName: ""
+}
+-> { Result: [ { Status } ], validationMessage? }   # success: Result[0].Status > 0
+```
+
+**Verified live 2026-10-28** (owner-supervised): one message sent to a practice
+group through `insync_send_message`; the portal answered `Result[0].Status > 0`
+and the message appeared at the top of the Sent folder
+(`GetMessages?messageType=4`). The Sent list shows `ToGroupName` as `Patient`
+for patient-sent messages, whatever group they went to.
+
+### Reply — `insync_reply_message`
+
+`POST Messages/GetComposeDetailForReply` — form `Mstparams = JSON {TODOChildId,
+TODOMasterId}` → the reply partial (verified, on a read message). Hidden inputs:
+
+```
+#todoMasterId / #todoChildId   # the thread ids
+#lblReplyToID                  # -> FromGroupId
+#ToGroupIds                    # -> ToGroupIds (observed "-1")
+#hdnGroupName                  # the replying-to group; EMPTY when that staff member left
+                               #   the practice — the UI then disables the reply, and so
+                               #   does this server
+#emailhistory                  # the quoted thread (attribute-encoded)
+#txtSubject                    # prefilled "Re: …"
+```
+
+`POST Messages/ReplySendEmail` — form `objReplySent = JSON { TODOMasterId,
+TODOChildId, TaskSubject, TaskMessage, History, ToGroupIds, FromGroupId,
+_setPatientSignature: false, _setPatientSignaturepath: "", AttachmentFileName:
+"" }` → same `Result[0].Status > 0` signal. `History` is the decoded
+`#emailhistory` re-escaped with `$('<div>').text(v).html()` (`&`, `<`, `>`). The
+reply partial has no `ReminderDate`, so none is sent. An UNREAD message is
+refused unless `allow_mark_read` (loading its reply form is unverified on an
+unread message).
+
+**Verified live 2026-10-28** (owner-supervised): one reply sent on a read thread
+through `insync_reply_message`; the portal answered `Result[0].Status > 0`, and
+the thread appeared in Sent with `IsReplied: true`, a new `TODOChildId` and the
+reply's date in `ReminderDateText`. The Sent list sorts by the thread's
+`CreatedOn`, so a reply on an old thread is NOT at the top — find it with
+`searchStr=<subject>`.
+
+### Refill request — `insync_get_refill_options`, `insync_request_refill`
+
+`GET RefillPrescription/RefillPrescription` (verified) — the refill page:
+
+```
+select#ddlRefillDrug > option[value]            # -> medications[].medicationId / name
+select#ddlSearchPrimaryProvider > option[value] # -> providers[].providerId / name
+input#PracticeName                              # -> practice
+```
+
+`POST RefillPrescription/SaveRefillRequest` — jQuery's serialization of
+`{ refillPrescripationList: [row] }` (sic), form-urlencoded:
+
+```
+refillPrescripationList[0][DrugName]        # selected names joined ", "
+refillPrescripationList[0][NoOfRefills]
+refillPrescripationList[0][ReasonForRefill]
+refillPrescripationList[0][PharmacyName]
+refillPrescripationList[0][PharmacyAddress]
+refillPrescripationList[0][PharmacyPhone]
+refillPrescripationList[0][ResourceId]      # the provider option value
+refillPrescripationList[0][MedicationIDs]   # selected ids joined ","
+```
+
+The portal's success handler reads nothing from the response, so a 2xx is the
+only success signal. Verify with `insync_list_refill_requests`.
+
+### Appointment request — `insync_find_appointment_slots`, `insync_request_appointment`
+
+All lookups verified:
+
+```
+GET  PatientScheduler                                  # input#PracticeID
+POST PatientScheduler/BindFacilities?practiceId=<id>   -> FacilityData[].{FacilityId, FacilityName, IsPrimaryForPatient}
+POST PatientScheduler/BindProviders?facilityId&date=MM/DD/YYYY&GenderIds=&LanguageIds=&ServiceOfferedIds=&CredentialIds=
+     -> ProviderData[].{ResourceId, ProviderName, IsPrimaryProvider, ScheduleSetupID, ResourceType, DayOfTheWeek, ScheduleID}
+POST PatientScheduler/GetSchedulerVisitTypeSlots  JSON {VisitDate, ScheduleSetupID, SpCalledFrom: 1, FacilityId}
+     -> lst[].{EncounterTypeID, EncounterType}, IsAppointmentReqPlotVisitTypeMandatory?
+POST PatientScheduler/BindSchedulerSlots?providerId=<ScheduleSetupID>&date&currentTime=MM/DD/YYYY hh:mm AM&ResourceId&EncounterTypeID
+     -> ScheduleSlots[].{Time, Duration, IsAvailable, ScheduleID}, NextAvailability.NextAvailablityDate
+```
+
+Note `providerId` carries the **schedule-setup** id, not the resource id. The
+portal defaults to the facility with `IsPrimaryForPatient == 1` and the provider
+with `IsPrimaryProvider == 1`; so does this server.
+
+`POST PatientScheduler/SaveAppointmentReq` — JSON (Angular `$http.post`), one
+fixed slot (`IsFlexible: false`; the flexible window is not offered):
+
+```
+{ FacilityId: "<id>", ResourceId, ScheduleSetupID, ResourceType, IsFlexible: false,
+  PrefferedDate: "MM/DD/YYYY", PrefferedTime: "<slot Time>",
+  FlexibleDateFrom: "", FlexibleDateTo: "", FlexibleTimeFrom: "", FlexibleTimeTo: "",
+  Comments, IsTelemedicineMeeting, VisitTypeID: <id or "">, Duration, ScheduleID }
+-> { resultModel: { Status, PPARID, ResponseMsg? }, requestDate }
+   # Status 1 = requested (PPARID = request id), 2 = already booked, 4 = ResponseMsg refusal
+```
+
+### Cancellation request — `insync_cancel_appointment`
+
+```
+GET Appointment/CheckCancelAppointmentRequestTimeDuration?VisitID=<id>   # verified: "0" allowed, "2" period passed
+POST Appointment/CancelAppointmentRequest  form {VisitID, caseID}        # verified: the modal partial;
+                                                                          #   carries data-visitid / data-pparid
+                                                                          #   and the save script below
+```
+
+`POST Appointment/SaveCancelAppointmentRequest` — form-urlencoded (`ServerCall`
+→ `$.ajax`):
+
+```
+VisitID, PPARID (from the upcoming-list row; 0 for a booked visit), Comments (required), caseID: "3"
+```
+
+`caseID` only steers the portal's own UI refresh (`3` = the current & future
+list). The success handler reads nothing, so a 2xx is the signal. The upcoming
+row's `IsNotCancel == 1` is refused before anything is sent. This is a
+**request**: the practice reviews it.

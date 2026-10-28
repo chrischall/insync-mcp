@@ -11,6 +11,9 @@ import { registerInsyncHealthcheckTool } from '../src/tools/healthcheck.js';
 import { registerMessageTools } from '../src/tools/messages.js';
 import { registerProfileTools } from '../src/tools/profile.js';
 import { registerUploadTools } from '../src/tools/uploads.js';
+import { registerComposeTools } from '../src/tools/compose.js';
+import { registerRefillTools } from '../src/tools/refills.js';
+import { registerSchedulingTools } from '../src/tools/scheduling.js';
 import { stubDownloadIO } from './_tools.js';
 
 const stubTransport: InsyncTransport = {
@@ -38,6 +41,9 @@ async function servedTools() {
     registerProfileTools(server, client);
     registerDownloadTools(server, client, stubDownloadIO);
     registerUploadTools(server, client, { allowedRoots: 'unconfined' });
+    registerComposeTools(server, client);
+    registerRefillTools(server, client);
+    registerSchedulingTools(server, client);
     registerInsyncHealthcheckTool(server, client, 'pfbhintouch.insynchcs.com', {
       bridge: undefined,
       credentialsConfigured: true,
@@ -50,7 +56,7 @@ async function servedTools() {
 
 describe('tool annotations', () => {
   it('covers the whole served surface', async () => {
-    expect(await servedTools()).toHaveLength(18);
+    expect(await servedTools()).toHaveLength(26);
   });
 
   it('marks every tool open-world', async () => {
@@ -82,7 +88,12 @@ describe('tool annotations', () => {
       .map((t) => [t.name, t.annotations?.destructiveHint])
       .sort(([a], [b]) => String(a).localeCompare(String(b)));
     expect(writes).toEqual([
+      ['insync_cancel_appointment', true],
       ['insync_get_message', true],
+      ['insync_reply_message', true],
+      ['insync_request_appointment', true],
+      ['insync_request_refill', true],
+      ['insync_send_message', true],
       ['insync_upload_insurance_card', true],
     ]);
 

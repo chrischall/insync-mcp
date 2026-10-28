@@ -18,6 +18,9 @@ import { registerDownloadTools } from '../src/tools/downloads.js';
 import { registerMessageTools } from '../src/tools/messages.js';
 import { registerProfileTools } from '../src/tools/profile.js';
 import { registerUploadTools } from '../src/tools/uploads.js';
+import { registerComposeTools } from '../src/tools/compose.js';
+import { registerRefillTools } from '../src/tools/refills.js';
+import { registerSchedulingTools } from '../src/tools/scheduling.js';
 
 export interface FakeCall {
   verb: 'getJson' | 'postJson' | 'postForm' | 'getText' | 'postText' | 'getBinary' | 'postBinary';
@@ -76,7 +79,7 @@ export const okJson = (value: unknown): FetchResult => ({ status: 200, body: JSO
 export const okText = (body: string): FetchResult => ({ status: 200, body });
 
 export type ToolResult = { content: { text: string }[]; isError?: boolean };
-export type Handler = (args: Record<string, unknown>) => Promise<ToolResult>;
+export type Handler = (args: Record<string, unknown>, ctx?: unknown) => Promise<ToolResult>;
 
 /** Register a tool module and return its handlers keyed by tool name. */
 export function capture(
@@ -91,6 +94,39 @@ export function capture(
   const client = new InsyncClient({ transport });
   register(server, client);
   return { handlers, transport, client };
+}
+
+/**
+ * A request context from a client WITHOUT MCP elicitation, so a confirm-gated
+ * write takes the two-phase preview → confirmToken path.
+ */
+export function writeCtx(): unknown {
+  return {
+    mcpReq: {
+      envelope: {
+        'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+        'io.modelcontextprotocol/clientCapabilities': { extensions: {} },
+      },
+      inputResponses: undefined,
+      requestState: () => undefined,
+    },
+  };
+}
+
+/**
+ * Drive a confirm-gated tool: `preview` is phase 1; `confirmed` previews, clears
+ * the recorded calls, then repeats the call with the issued token.
+ */
+export function gated(fn: Handler, transport: FakeTransport) {
+  return {
+    preview: async (args: Record<string, unknown>) => jsonOf(await fn(args, writeCtx())),
+    raw: (args: Record<string, unknown>) => fn(args, writeCtx()),
+    confirmed: async (args: Record<string, unknown>) => {
+      const preview = jsonOf(await fn(args, writeCtx()));
+      transport.calls.length = 0;
+      return fn({ ...args, confirmToken: preview.confirmToken as string }, writeCtx());
+    },
+  };
 }
 
 /** The text of a tool result's first content block. */
@@ -139,5 +175,8 @@ export function readToolRoster(): string[] {
   registerProfileTools(server, client);
   registerDownloadTools(server, client, stubDownloadIO);
   registerUploadTools(server, client, { allowedRoots: 'unconfined' });
+  registerComposeTools(server, client);
+  registerRefillTools(server, client);
+  registerSchedulingTools(server, client);
   return names;
 }
