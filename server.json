@@ -1,0 +1,65 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.chrischall/insync-mcp",
+  "description": "Read-only InSync Healthcare patient portal: appointments, medications, messages, forms",
+  "repository": {
+    "url": "https://github.com/chrischall/insync-mcp",
+    "source": "github"
+  },
+  "version": "0.0.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@chrischall/insync-mcp",
+      "version": "0.0.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "INSYNC_PORTAL",
+          "description": "Your practice's portal, scheme and host only, e.g. https://<practice>intouch.insynchcs.com.",
+          "isRequired": true,
+          "format": "string"
+        },
+        {
+          "name": "INSYNC_USERNAME",
+          "description": "Portal username. Set with INSYNC_PASSWORD to sign in server-side. Leave both empty to relay through your signed-in browser tab.",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "INSYNC_PASSWORD",
+          "description": "Portal password. A rejected sign-in is never retried automatically, because the portal counts failures toward a lockout.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": true
+        },
+        {
+          "name": "INSYNC_TRANSPORT",
+          "description": "server or fetchproxy. Default: server when both credentials are set, otherwise fetchproxy.",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "INSYNC_WS_PORT",
+          "description": "Override the fetchproxy WebSocket port (default 37149).",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "FETCHPROXY_WS_HOST",
+          "description": "Bind interface for the fetchproxy concentrator, a literal IP only (default 127.0.0.1). Keep on loopback; it exists for hosted deployments that run each MCP in its own network namespace.",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "FETCHPROXY_IDENTITY_DIR",
+          "description": "Absolute path where the fetchproxy long-term identity keypair is stored (default ~/.fetchproxy/identity/).",
+          "isRequired": false,
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}

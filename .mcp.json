@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "insync": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@chrischall/insync-mcp"
+      ],
+      "env": {
+        "INSYNC_WS_PORT": "37149"
+      }
+    }
+  }
+}

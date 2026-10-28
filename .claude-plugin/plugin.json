@@ -1,0 +1,22 @@
+{
+  "name": "insync-mcp",
+  "displayName": "InSync Patient Portal",
+  "version": "0.0.0",
+  "description": "Read-only access to an InSync Healthcare (Qualifacts) patient portal — appointments, medications, allergies, messages, forms, balance",
+  "author": {
+    "name": "Chris Hall",
+    "email": "chris.c.hall@gmail.com"
+  },
+  "homepage": "https://github.com/chrischall/insync-mcp",
+  "repository": "https://github.com/chrischall/insync-mcp",
+  "license": "MIT",
+  "keywords": [
+    "insync",
+    "qualifacts",
+    "patient-portal",
+    "behavioral-health",
+    "mcp"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json"
+}

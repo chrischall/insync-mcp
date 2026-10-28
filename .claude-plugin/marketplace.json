@@ -1,0 +1,35 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "insync-mcp",
+  "owner": {
+    "name": "Chris Hall",
+    "email": "chris.c.hall@gmail.com"
+  },
+  "metadata": {
+    "description": "Read-only MCP server for InSync Healthcare (Qualifacts) patient portals — appointments, medications, allergies, messages, forms and balance. Signs in server-side with the portal password, or relays requests through the user's signed-in browser tab via the ContextMint Bridge extension.",
+    "version": "0.0.0"
+  },
+  "plugins": [
+    {
+      "name": "insync-mcp",
+      "displayName": "InSync Patient Portal",
+      "source": "./",
+      "description": "Read an InSync Healthcare (Qualifacts) patient portal — appointments, medications, allergies, messages, forms, balance — by signing in server-side or relaying through the user's signed-in browser tab.",
+      "version": "0.0.0",
+      "author": {
+        "name": "Chris Hall"
+      },
+      "homepage": "https://github.com/chrischall/insync-mcp",
+      "repository": "https://github.com/chrischall/insync-mcp",
+      "license": "MIT",
+      "keywords": [
+        "insync",
+        "qualifacts",
+        "patient-portal",
+        "behavioral-health",
+        "fetchproxy"
+      ],
+      "category": "productivity"
+    }
+  ]
+}

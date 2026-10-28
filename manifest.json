@@ -1,0 +1,102 @@
+{
+  "$schema": "https://raw.githubusercontent.com/anthropics/dxt/main/dist/mcpb-manifest.schema.json",
+  "manifest_version": "0.3",
+  "name": "insync-mcp",
+  "display_name": "InSync Patient Portal",
+  "version": "0.0.0",
+  "description": "Read an InSync Healthcare (Qualifacts) patient portal — appointments, medications, allergies, messages, forms and balance — by signing in server-side with your portal password, or by relaying through your signed-in browser tab.",
+  "author": {
+    "name": "Chris Chall",
+    "email": "chris.c.hall@gmail.com",
+    "url": "https://github.com/chrischall"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/chrischall/insync-mcp"
+  },
+  "homepage": "https://github.com/chrischall/insync-mcp",
+  "support": "https://github.com/chrischall/insync-mcp/issues",
+  "license": "MIT",
+  "keywords": [
+    "insync",
+    "qualifacts",
+    "patient-portal",
+    "behavioral-health",
+    "fetchproxy"
+  ],
+  "server": {
+    "type": "node",
+    "entry_point": "dist/bundle.js",
+    "mcp_config": {
+      "command": "node",
+      "args": [
+        "${__dirname}/dist/bundle.js"
+      ],
+      "env": {
+        "INSYNC_PORTAL": "${user_config.insync_portal}",
+        "INSYNC_USERNAME": "${user_config.insync_username}",
+        "INSYNC_PASSWORD": "${user_config.insync_password}",
+        "INSYNC_TRANSPORT": "${user_config.insync_transport}",
+        "INSYNC_WS_PORT": "${user_config.insync_ws_port}",
+        "FETCHPROXY_WS_HOST": "${user_config.fetchproxy_ws_host}",
+        "FETCHPROXY_IDENTITY_DIR": "${user_config.fetchproxy_identity_dir}"
+      }
+    }
+  },
+  "tools": [],
+  "user_config": {
+    "insync_portal": {
+      "type": "string",
+      "title": "Portal URL",
+      "description": "Your practice's portal, scheme and host only, e.g. https://<practice>intouch.insynchcs.com.",
+      "required": true
+    },
+    "insync_username": {
+      "type": "string",
+      "title": "Portal username",
+      "description": "Portal username. Set with the password to sign in server-side. Leave both empty to relay through your signed-in browser tab.",
+      "required": false
+    },
+    "insync_password": {
+      "type": "string",
+      "title": "Portal password",
+      "description": "Portal password. A rejected sign-in is never retried automatically, because the portal counts failures toward a lockout.",
+      "required": false,
+      "sensitive": true
+    },
+    "insync_transport": {
+      "type": "string",
+      "title": "Transport (advanced)",
+      "description": "server or fetchproxy. Default: server when username and password are both set, otherwise fetchproxy.",
+      "required": false
+    },
+    "insync_ws_port": {
+      "type": "string",
+      "title": "fetchproxy port (advanced)",
+      "description": "fetchproxy concentrator port (fetchproxy transport only, default 37149). The whole fleet shares this one port; override only when hosting.",
+      "required": false
+    },
+    "fetchproxy_ws_host": {
+      "type": "string",
+      "title": "fetchproxy bind address (advanced)",
+      "description": "Bind interface for the fetchproxy concentrator, a literal IP only (default 127.0.0.1). Keep on loopback; it exists for hosted deployments that run each MCP in its own network namespace.",
+      "required": false
+    },
+    "fetchproxy_identity_dir": {
+      "type": "string",
+      "title": "fetchproxy identity directory (advanced)",
+      "description": "Absolute path where the fetchproxy long-term identity keypair is stored (default ~/.fetchproxy/identity/).",
+      "required": false
+    }
+  },
+  "compatibility": {
+    "platforms": [
+      "darwin",
+      "win32",
+      "linux"
+    ],
+    "runtimes": {
+      "node": ">=22.5.0"
+    }
+  }
+}
