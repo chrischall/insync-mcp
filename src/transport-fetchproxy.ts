@@ -13,12 +13,13 @@ import {
   type BridgeProbeResult,
   type FetchproxyTransport as InnerTransport,
 } from '@chrischall/mcp-utils/fetchproxy';
-import type {
-  BinaryFetchResult,
-  FetchResult,
-  InsyncTransport,
-  RequestOptions,
-  S3Config,
+import {
+  formBody,
+  type BinaryFetchResult,
+  type FetchResult,
+  type InsyncTransport,
+  type RequestOptions,
+  type S3Config,
 } from './transport.js';
 
 /**
@@ -99,7 +100,7 @@ export class FetchproxyTransport implements InsyncTransport {
     form: Record<string, string> | URLSearchParams,
     opts: RequestOptions = {},
   ): Promise<FetchResult> {
-    const body = form instanceof URLSearchParams ? form.toString() : new URLSearchParams(form).toString();
+    const body = formBody(form);
     return this.send(
       'POST',
       path,

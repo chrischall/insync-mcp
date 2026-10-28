@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { isSignedOut } from '../src/client.js';
 import { SecretScrubber } from '../src/secrets.js';
 import { ServerTransport } from '../src/transport-server.js';
-import { parsePortal } from '../src/transport.js';
+import { formBody, parsePortal } from '../src/transport.js';
 
 const PORTAL = 'https://pfbhintouch.insynchcs.com';
+// Another practice's portal: same insynchcs.com suffix, different tenant.
+const OTHER_PRACTICE = 'https://otherpractice.insynchcs.com';
 const DASH = '<html><head><title>Portal :: Dashboard</title></head><body>ok</body></html>';
 const LOGIN_PAGE = '<html><head><title>Portal :: Login</title></head><body></body></html>';
 const LANDING =
@@ -165,6 +167,49 @@ describe('ServerTransport login (happy path)', () => {
     expect(t.getS3Config()?.accessKeyId).toBeUndefined();
   });
 
+  it('registers the password with the scrubber at construction, before any request', () => {
+    const { mock, scrubber } = makeTransport();
+    expect(scrubber.has('pw-secret')).toBe(true);
+    expect(mock.cookiesSeen).toHaveLength(0);
+  });
+
+  it('constructs without a password and registers nothing', () => {
+    const { scrubber } = makeTransport({ creds: { username: 'u', password: undefined } });
+    expect(scrubber.size).toBe(0);
+  });
+
+  it('drops a cookie the portal deletes (Max-Age<=0 or a past Expires)', async () => {
+    const future = new Date(Date.now() + 86_400_000).toUTCString();
+    const { t, mock } = makeTransport({
+      landing: () =>
+        resp(200, LANDING, { setCookies: ['GONE=1', 'OLD=1', 'KEEP=1', 'FUT=1', 'ODD=1'] }),
+      handoff: () =>
+        resp(302, '', {
+          location: '/Dashboard',
+          setCookies: [
+            'GONE=; Max-Age=0; path=/',
+            'OLD=; expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly',
+            'KEEP=2; Max-Age=3600',
+            `FUT=2; Expires=${future}`,
+            // Max-Age wins over Expires (RFC 6265 §5.3 step 3).
+            'ODD=2; Max-Age=60; Expires=Thu, 01 Jan 1970 00:00:00 GMT',
+          ],
+        }),
+    });
+    await t.getJson('A');
+    const last = mock.cookiesSeen.at(-1) ?? '';
+    expect(last).not.toContain('GONE=');
+    expect(last).not.toContain('OLD=');
+    expect(last).toContain('KEEP=2');
+    expect(last).toContain('FUT=2');
+    expect(last).toContain('ODD=2');
+  });
+
+  it('follows an absolute handoff redirect that stays on the portal host', async () => {
+    const { t } = makeTransport({ handoff: () => resp(302, '', { location: `${PORTAL}/Dashboard` }) });
+    expect((await t.getJson('A')).status).toBe(200);
+  });
+
   it('succeeds when the handoff redirect carries no Location', async () => {
     const { t } = makeTransport({ handoff: () => resp(302, '') });
     expect((await t.getJson('A')).status).toBe(200);
@@ -250,6 +295,15 @@ describe('ServerTransport transient failures (retried)', () => {
   it('fails when the handoff redirects off the portal domain', async () => {
     const { t } = makeTransport({ handoff: () => resp(302, '', { location: 'https://evil.example.com/x' }) });
     await expect(t.getJson('A')).rejects.toThrow(/off the portal domain/);
+  });
+
+  it("refuses a handoff redirect to another practice's insynchcs.com portal", async () => {
+    const { t, mock } = makeTransport({
+      handoff: () => resp(302, '', { location: `${OTHER_PRACTICE}/Dashboard` }),
+    });
+    await expect(t.getJson('A')).rejects.toThrow(/off the portal domain/);
+    // The session cookie never reached the other practice: no Dashboard GET ran.
+    expect(mock.cookiesSeen.filter((c) => c.includes('.ASPXAUTH'))).toHaveLength(1);
   });
 
   it('fails when the handoff loops too many times', async () => {
@@ -375,6 +429,40 @@ describe('ServerTransport binary downloads', () => {
     await expect(t.getBinary('x')).rejects.toThrow(/off the portal domain/);
   });
 
+  it("refuses a redirect to another practice's insynchcs.com portal", async () => {
+    const { t, mock } = makeTransport({
+      dataResponses: [bin(302, '', { location: `${OTHER_PRACTICE}/x` })],
+    });
+    await expect(t.getBinary('x')).rejects.toThrow(/off the portal domain/);
+    expect(mock.dataCalls).toBe(1);
+  });
+
+  it('follows an absolute redirect that stays on the portal host', async () => {
+    const { t } = makeTransport({
+      dataResponses: [
+        bin(302, '', { location: `${PORTAL}/DocumentManager/Resolved` }),
+        bin(200, Buffer.from('PDF'), { contentType: 'application/pdf' }),
+      ],
+    });
+    const res = await t.getBinary('x');
+    expect(Buffer.from(res.bytes).toString()).toBe('PDF');
+  });
+
+  it('refuses a redirect that downgrades the portal to plain http', async () => {
+    const { t } = makeTransport({
+      dataResponses: [bin(302, '', { location: 'http://pfbhintouch.insynchcs.com/x' })],
+    });
+    await expect(t.getBinary('x')).rejects.toThrow(/off the portal domain/);
+  });
+
+  it("refuses an absolute path on another practice's portal", async () => {
+    const { t, mock } = makeTransport();
+    await expect(t.getBinary(`${OTHER_PRACTICE}/file.pdf`)).rejects.toThrow(
+      /outside the InSync portal/,
+    );
+    expect(mock.dataCalls).toBe(0);
+  });
+
   it('refuses an absolute path outside the portal', async () => {
     const { t } = makeTransport();
     await expect(t.getBinary('https://evil.example.com/file.pdf')).rejects.toThrow(
@@ -415,5 +503,19 @@ describe('parsePortal', () => {
 
   it('marks a missing portal as no_credential', () => {
     expect(() => parsePortal(undefined)).toThrow(expect.objectContaining({ kind: 'no_credential' }));
+  });
+});
+
+describe('formBody', () => {
+  it('encodes a plain record', () => {
+    expect(formBody({ a: '1', b: 'x y' })).toBe('a=1&b=x+y');
+  });
+
+  it('passes URLSearchParams through, keeping repeated keys', () => {
+    const form = new URLSearchParams([
+      ['k', '1'],
+      ['k', '2'],
+    ]);
+    expect(formBody(form)).toBe('k=1&k=2');
   });
 });
