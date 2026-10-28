@@ -16,7 +16,7 @@
 // account lockout. It is thrown as a PermanentTransportError, which the session
 // manager caches.
 
-import { McpToolError } from '@chrischall/mcp-utils';
+import { CookieJar, McpToolError } from '@chrischall/mcp-utils';
 import { createCookieSessionManager, type CookieSessionManager } from '@chrischall/mcp-utils/session';
 import { isSignedOut } from './client.js';
 import { SecretScrubber } from './secrets.js';
@@ -38,7 +38,7 @@ const USER_AGENT = 'Mozilla/5.0';
 const API_HINT = 'The portal sign-in flow may have changed; see docs/INSYNC-API.md.';
 
 interface InsyncSession {
-  jar: Map<string, string>;
+  jar: CookieJar;
   s3: S3Config;
 }
 
@@ -57,39 +57,6 @@ export interface ServerTransportOptions {
   scrubber: SecretScrubber;
   /** Injectable for tests; the real `fetch` otherwise. */
   fetchImpl?: typeof fetch;
-}
-
-function cookieHeader(jar: Map<string, string>): string {
-  return [...jar].map(([k, v]) => `${k}=${v}`).join('; ');
-}
-
-// Whether a Set-Cookie line's attributes delete the cookie: `Max-Age` <= 0, or
-// (absent Max-Age, which takes precedence per RFC 6265 §5.3) an `Expires` in
-// the past. That is how the portal clears a cookie on sign-out; without this
-// the jar would keep resending a value the server meant to drop. Domain and
-// Path are still ignored — every request goes to the one pinned portal host.
-function isDeletion(attributes: string[]): boolean {
-  const attrs = new Map<string, string>();
-  for (const attr of attributes) {
-    const eq = attr.indexOf('=');
-    const name = (eq < 0 ? attr : attr.slice(0, eq)).trim().toLowerCase();
-    attrs.set(name, eq < 0 ? '' : attr.slice(eq + 1).trim());
-  }
-  const maxAge = attrs.get('max-age');
-  if (maxAge !== undefined) return Number(maxAge) <= 0;
-  const expires = attrs.get('expires');
-  return expires !== undefined && Date.parse(expires) <= Date.now();
-}
-
-function absorb(headers: Headers, jar: Map<string, string>): void {
-  for (const line of headers.getSetCookie()) {
-    const [pair, ...attributes] = line.split(';');
-    const eq = pair.indexOf('=');
-    if (eq <= 0) continue;
-    const name = pair.slice(0, eq).trim();
-    if (isDeletion(attributes)) jar.delete(name);
-    else jar.set(name, pair.slice(eq + 1));
-  }
 }
 
 function readS3(data: Record<string, unknown>): S3Config {
@@ -210,28 +177,27 @@ export class ServerTransport implements InsyncTransport {
   }
 
   private async doBinaryRequest(
-    jar: Map<string, string>,
+    jar: CookieJar,
     spec: RequestSpec,
   ): Promise<BinaryFetchResult> {
-    let url = new URL(spec.path, `${this.portal().origin}/`);
-    if (!this.onPortal(url)) {
-      throw new McpToolError('Refusing to download from a host outside the InSync portal.', {
-        hint: 'InSync file downloads go only through the portal, never direct storage (S3).',
-      });
-    }
+    let url = this.assertOnPortal(
+      new URL(spec.path, `${this.portal().origin}/`),
+      'Refusing to download from a host outside the InSync portal.',
+      'InSync file downloads go only through the portal, never direct storage (S3).',
+    );
     for (let hop = 0; hop < 10; hop++) {
       const res = await this.doFetch(url.toString(), {
         method: hop === 0 ? spec.method : 'GET',
         redirect: 'manual',
         headers: {
-          Cookie: cookieHeader(jar),
+          Cookie: jar.header(),
           'X-Requested-With': 'XMLHttpRequest',
           'User-Agent': USER_AGENT,
           ...spec.headers,
         },
         body: hop === 0 ? spec.body : undefined,
       });
-      absorb(res.headers, jar);
+      jar.absorb(res.headers);
       const location = res.headers.get('location');
       const contentType = res.headers.get('content-type') ?? undefined;
       if (res.status >= 300 && res.status < 400 && location !== null) {
@@ -241,12 +207,11 @@ export class ServerTransport implements InsyncTransport {
         if (/\/Login/i.test(next.pathname)) {
           return { status: res.status, body: '', bytes: new Uint8Array(), url: location, contentType };
         }
-        if (!this.onPortal(next)) {
-          throw new McpToolError('InSync redirected the download off the portal domain.', {
-            hint: 'File downloads go only through the portal, never direct storage (S3).',
-          });
-        }
-        url = next;
+        url = this.assertOnPortal(
+          next,
+          'InSync redirected the download off the portal domain.',
+          'File downloads go only through the portal, never direct storage (S3).',
+        );
         continue;
       }
       const bytes = new Uint8Array(await res.arrayBuffer());
@@ -280,27 +245,31 @@ export class ServerTransport implements InsyncTransport {
     return this.portalInfo;
   }
 
-  // Whether a URL is on exactly this practice's portal origin (scheme, host and
-  // port). Every practice shares the insynchcs.com suffix, so a suffix check
-  // would hand this session's cookie jar to ANOTHER practice's portal on a
-  // redirect; and pinning the scheme keeps the cookies off plain http.
-  private onPortal(url: URL): boolean {
-    return url.origin === this.portal().origin;
+  // The one per-hop gate, run before EVERY cookie-carrying fetch that follows a
+  // URL (each download hop, first included, and each sign-in handoff hop):
+  // returns the URL when it is on exactly this practice's portal origin
+  // (scheme, host and port), and throws otherwise. Every practice shares the
+  // insynchcs.com suffix, so a suffix or host-only check would hand this
+  // session's cookie jar to ANOTHER practice's portal on a redirect; and
+  // pinning the scheme and port keeps the cookies off plain http.
+  private assertOnPortal(url: URL, message: string, hint: string): URL {
+    if (url.origin !== this.portal().origin) throw new McpToolError(message, { hint });
+    return url;
   }
 
-  private async doRequest(jar: Map<string, string>, spec: RequestSpec): Promise<FetchResult> {
+  private async doRequest(jar: CookieJar, spec: RequestSpec): Promise<FetchResult> {
     const res = await this.doFetch(new URL(spec.path, `${this.portal().origin}/`).toString(), {
       method: spec.method,
       redirect: 'manual',
       headers: {
-        Cookie: cookieHeader(jar),
+        Cookie: jar.header(),
         'X-Requested-With': 'XMLHttpRequest',
         'User-Agent': USER_AGENT,
         ...spec.headers,
       },
       body: spec.body,
     });
-    absorb(res.headers, jar);
+    jar.absorb(res.headers);
     const body = await res.text();
     const location = res.headers.get('location');
     return { status: res.status, body, url: location === null ? undefined : location };
@@ -321,7 +290,7 @@ export class ServerTransport implements InsyncTransport {
       );
     }
 
-    const jar = new Map<string, string>();
+    const jar = new CookieJar();
     const landing = await this.doRequest(jar, {
       method: 'GET',
       path: '/',
@@ -444,14 +413,10 @@ export class ServerTransport implements InsyncTransport {
 
   // Every hop — the login JSON's own `url` included, which is the first request
   // to carry the fresh session cookies — is origin-checked BEFORE it is fetched.
-  private async followHandoff(jar: Map<string, string>, startUrl: string): Promise<void> {
+  private async followHandoff(jar: CookieJar, startUrl: string): Promise<void> {
     let current = new URL(startUrl, `${this.portal().origin}/`);
     for (let hop = 0; hop < 10; hop++) {
-      if (!this.onPortal(current)) {
-        throw new McpToolError('InSync sign-in redirected off the portal domain.', {
-          hint: API_HINT,
-        });
-      }
+      this.assertOnPortal(current, 'InSync sign-in redirected off the portal domain.', API_HINT);
       const res = await this.doRequest(jar, {
         method: 'GET',
         path: current.toString(),
