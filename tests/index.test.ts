@@ -20,6 +20,7 @@ describe('tool roster', () => {
       'insync_list_messages',
       'insync_list_refill_requests',
       'insync_list_surveys',
+      'insync_upload_insurance_card',
     ]);
   });
 });

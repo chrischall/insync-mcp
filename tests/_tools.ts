@@ -17,6 +17,7 @@ import { registerDocumentTools } from '../src/tools/documents.js';
 import { registerDownloadTools } from '../src/tools/downloads.js';
 import { registerMessageTools } from '../src/tools/messages.js';
 import { registerProfileTools } from '../src/tools/profile.js';
+import { registerUploadTools } from '../src/tools/uploads.js';
 
 export interface FakeCall {
   verb: 'getJson' | 'postJson' | 'postForm' | 'getText' | 'postText' | 'getBinary' | 'postBinary';
@@ -137,5 +138,6 @@ export function readToolRoster(): string[] {
   registerDocumentTools(server, client);
   registerProfileTools(server, client);
   registerDownloadTools(server, client, stubDownloadIO);
+  registerUploadTools(server, client, { allowedRoots: 'unconfined' });
   return names;
 }

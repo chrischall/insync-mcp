@@ -109,6 +109,10 @@
       "description": "Download a document filed to the patient's portal account, by the folder_url and file_name from insync_list_documents. Saves to disk locally or returns bytes inline when hosted; goes through the portal, never direct storage."
     },
     {
+      "name": "insync_upload_insurance_card",
+      "description": "Upload a photo of your insurance card (front, back, or both) to your own InSync profile, from a local JPG/JPEG/PNG file. Writes to the portal and is irreversible, so it is confirm-gated: the first call returns a preview and a confirmToken, and only a repeat call with that token uploads."
+    },
+    {
       "name": "insync_healthcheck",
       "description": "Report portal connectivity from whichever transport is live: the server-side credential sign-in, or the browser bridge. Skipped when no credential resolves."
     }

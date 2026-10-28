@@ -70,3 +70,59 @@ and fetches nothing.
 > appears in `_bundles_genralScriptbundle` as an alternative byte route. The
 > Angular document viewer uses `GetFileSource` → `GetFile` instead, so that is
 > what this server implements.
+
+## File upload (T5)
+
+> **Provenance:** **derived from the portal JS** (`_JS_ProfileBundle`), **UNVERIFIED
+> on the wire.** No agent performs a real upload — it mutates practice-visible
+> state — so the request below was read out of the portal's own insurance-card
+> save path, not observed on a live POST. An owner-supervised live test confirms
+> it later; re-confirm the success signal and any anti-forgery requirement then.
+
+The only patient-facing upload the portal exposes is the **insurance-card image**
+save. There is deliberately no generic document-upload endpoint, and this server
+builds none.
+
+### Insurance card images
+
+`POST PatientProfile/SaveInsuranceCardImages` — form-urlencoded:
+
+```
+FrontImage           # base64 of the front image, data-URL prefix stripped ("" when not set)
+BackImage            # base64 of the back image, data-URL prefix stripped ("" when not set)
+DocManagerImagePath  # "" from a plain upload (the scanner path, unused here)
+ScannerName          # "" from a plain upload
+```
+
+The portal JS strips a leading `data:image/<type>;base64,` prefix
+(`FileReader.readAsDataURL` result) before sending; this server reads raw file
+bytes, so its base64 has no such prefix, and it strips one defensively anyway.
+Only `.jpg`, `.jpeg` and `.png` are accepted here (the portal UI also lists
+`.gif`; it is omitted because the magic-byte guard the upload runs does not sniff
+a type it would then send).
+
+**Success signal.** The portal's own handler reads `data.Success` on this save;
+other saves in the same bundle read `Status == "1"`. This server accepts
+**either** (`Success === true` OR `Status == "1"`) and treats anything else as a
+rejection (nothing uploaded).
+
+**Anti-forgery.** The insurance-card `$.ajax` call does not itself carry
+`__RequestVerificationToken`, but other authenticated POSTs in the bundle attach
+the logged-in form token (`GET ClinicalSummary/GetAntiForgeryToken` →
+`{ success, formToken }`, which refreshes the hidden
+`__RequestVerificationToken` input). This server fetches that token immediately
+before the write and attaches it as both a form field and the
+`__RequestVerificationToken` header; a missing token is tolerated (the endpoint
+may not validate one). The token is minted per write and is NOT part of the
+confirm-gate binding.
+
+**Confirm gate.** The tool is `readOnly:false, destructive:true` and gated by
+`confirmWrite`: the first call reads nothing, returns a preview + `confirmToken`,
+and only a repeat call with that token (after the user approves the preview)
+uploads. The exact image bytes and the shown preview are bound into the token, so
+a file or argument that changed since the preview is refused as `DRAFT_CHANGED`.
+The write goes out once and is never replayed on a lapsed session.
+
+**Verification-after-write** (for the later live test, documented not executed):
+re-read the insurance details rather than trusting the save's `Status`/`Success`
+alone, since the response is unverified.

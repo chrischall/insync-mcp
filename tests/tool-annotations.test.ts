@@ -10,6 +10,7 @@ import { registerDownloadTools } from '../src/tools/downloads.js';
 import { registerInsyncHealthcheckTool } from '../src/tools/healthcheck.js';
 import { registerMessageTools } from '../src/tools/messages.js';
 import { registerProfileTools } from '../src/tools/profile.js';
+import { registerUploadTools } from '../src/tools/uploads.js';
 import { stubDownloadIO } from './_tools.js';
 
 const stubTransport: InsyncTransport = {
@@ -36,6 +37,7 @@ async function servedTools() {
     registerDocumentTools(server, client);
     registerProfileTools(server, client);
     registerDownloadTools(server, client, stubDownloadIO);
+    registerUploadTools(server, client, { allowedRoots: 'unconfined' });
     registerInsyncHealthcheckTool(server, client, 'pfbhintouch.insynchcs.com', {
       bridge: undefined,
       credentialsConfigured: true,
@@ -48,7 +50,7 @@ async function servedTools() {
 
 describe('tool annotations', () => {
   it('covers the whole served surface', async () => {
-    expect(await servedTools()).toHaveLength(17);
+    expect(await servedTools()).toHaveLength(18);
   });
 
   it('marks every tool open-world', async () => {
@@ -71,13 +73,18 @@ describe('tool annotations', () => {
 
   it('marks every read tool read-only and never read-and-destructive', async () => {
     const tools = await servedTools();
-    // insync_get_message is the one write among these: opening an unread
-    // message marks it read, which the practice sees and which cannot be undone.
+    // The two writes: insync_get_message (opening an unread message marks it
+    // read, which the practice sees and cannot be undone) and
+    // insync_upload_insurance_card (confirm-gated upload to the profile). Both
+    // are destructive; everything else is a read.
     const writes = tools
       .filter((t) => t.annotations?.readOnlyHint !== true)
       .map((t) => [t.name, t.annotations?.destructiveHint])
       .sort(([a], [b]) => String(a).localeCompare(String(b)));
-    expect(writes).toEqual([['insync_get_message', true]]);
+    expect(writes).toEqual([
+      ['insync_get_message', true],
+      ['insync_upload_insurance_card', true],
+    ]);
 
     const contradictory = tools
       .filter((t) => t.annotations?.readOnlyHint === true && t.annotations?.destructiveHint === true)

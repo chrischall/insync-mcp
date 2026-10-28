@@ -330,6 +330,61 @@ export class InsyncClient {
     );
   }
 
+  // --- writes (confirm-gated at the tool layer; the session/CSRF are attached here) ---
+
+  /**
+   * The single portal-write path. Fetches a fresh logged-in anti-forgery token,
+   * attaches it (as a form field AND the header the portal's own AJAX uses) and
+   * the session, POSTs the form ONCE — never replayed, so a lapsed session that
+   * silently re-authenticates cannot resubmit a write as whoever the new session
+   * serves — and judges the portal's accept/reject. Returns the portal `Status`
+   * for the tool to surface; throws (nothing written) on rejection.
+   *
+   * Derived from the portal JS, UNVERIFIED on the wire — see docs/INSYNC-API.md.
+   */
+  async upload(path: string, form: Record<string, string>): Promise<{ status?: string }> {
+    const token = await this.antiForgeryToken();
+    const body: Record<string, string> = { ...form };
+    const headers: Record<string, string> = {};
+    if (token !== undefined) {
+      body.__RequestVerificationToken = token;
+      headers.__RequestVerificationToken = token;
+    }
+    const res = await this.transport.postForm(path, body, { replay: false, headers });
+    const data = this.json<Record<string, unknown>>(res, path);
+    // The portal's success signal differs by handler: the insurance-card save
+    // reads `Success`, other saves read `Status == "1"`. Accept either.
+    const accepted = data.Success === true || String(data.Status) === '1';
+    if (!accepted) {
+      throw this.fail(
+        `InSync did not accept the upload to ${path}.`,
+        'Nothing was uploaded. The portal rejected the request, or its save flow changed; ' +
+          'see docs/INSYNC-API.md.',
+      );
+    }
+    return { status: data.Status !== undefined ? String(data.Status) : undefined };
+  }
+
+  /**
+   * A fresh logged-in anti-forgery token (`GetAntiForgeryToken` → `formToken`),
+   * fetched the moment before a write so it matches the current session. Read
+   * raw (not through {@link json}) because a signed-out response is surfaced as
+   * the portal-specific not-signed-in error, and a missing token is tolerated —
+   * the portal may not validate every endpoint, and the write still judges its
+   * own accept/reject.
+   */
+  private async antiForgeryToken(): Promise<string | undefined> {
+    const endpoint = 'ClinicalSummary/GetAntiForgeryToken';
+    const res = await this.transport.getText(endpoint);
+    if (isSignedOut(res)) throw new InsyncNotSignedInError(this.mode);
+    try {
+      const data = JSON.parse(res.body) as Record<string, unknown>;
+      return typeof data.formToken === 'string' && data.formToken !== '' ? data.formToken : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   /** Refuse an absolute download URL that leaves the InSync portal domain. */
   private assertPortalUrl(filePath: string): void {
     const isAbsolute = /^[a-z][a-z0-9+.-]*:\/\//i.test(filePath);
