@@ -1,6 +1,6 @@
 // Small shared helpers for the read tools: safe coercions for the loosely typed
-// portal payloads, and HTML-cell text cleanup for the two reads that come back
-// as table fragments. Kept deliberately tiny — anything a single tool needs
+// portal payloads, and HTML-cell whitespace cleanup for the two reads that come
+// back as table fragments. Kept deliberately tiny — anything a single tool needs
 // lives beside that tool.
 
 import { toolAnnotations } from '@chrischall/mcp-utils';
@@ -46,29 +46,57 @@ export function tidy(obj: Record<string, unknown>): Record<string, unknown> {
   return out;
 }
 
-/** Decode the handful of entities a server-rendered grid emits, then collapse whitespace. */
+/**
+ * Collapse a table cell's whitespace runs to single spaces and trim. Callers
+ * pass node-html-parser's `.text`, which is ALREADY entity-decoded — decoding
+ * again here would turn a practice's literal "&amp;" (sent as `&amp;amp;`) into
+ * "&", so this deliberately does whitespace only.
+ */
 export function cleanCellText(text: string): string {
-  const decoded = text
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&#39;/g, "'")
-    .replace(/&quot;/g, '"');
-  return decoded.replace(/\s+/g, ' ').trim();
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+/** The name segments that mark a key as a URL, path, token or secret. */
+const URLISH_SEGMENTS = new Set([
+  'path',
+  'url',
+  'uri',
+  'src',
+  'source',
+  'link',
+  'href',
+  'token',
+  'secret',
+  'key',
+  'sas',
+  'signature',
+]);
+
+/**
+ * A key name split into its lower-cased words: on `_`/`-`/space, on a
+ * lower-or-digit → upper boundary (`FilePath` → file, path), and at the end of
+ * an acronym (`AccessKeyID` → access, key, id; `S3URL` → s3, url).
+ */
+function keySegments(key: string): string[] {
+  return key
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .toLowerCase()
+    .split(/[\s_-]+/);
 }
 
 /**
  * Drop any key whose NAME looks like a URL, path, token or secret. Used on
  * message-attachment metadata so a session-authorized fetch URL never lands in
  * the transcript — the attachment bytes are the download tools' job, not a
- * read's.
+ * read's. A key matches only when one of its WORDS is a URL/secret token, so
+ * `DownloadUrl` and `AccessKeyID` go but `Monkey` (which merely contains the
+ * letters "key") stays.
  */
 export function stripUrlishKeys(value: unknown): Record<string, unknown> {
-  const urlish = /path|url|uri|src|source|link|href|token|secret|key|sas|signature/i;
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(asRecord(value))) {
-    if (!urlish.test(k)) out[k] = v;
+    if (!keySegments(k).some((seg) => URLISH_SEGMENTS.has(seg))) out[k] = v;
   }
   return out;
 }

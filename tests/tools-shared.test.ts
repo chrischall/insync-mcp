@@ -29,9 +29,16 @@ describe('sameId', () => {
 });
 
 describe('cleanCellText', () => {
-  it('decodes common entities and collapses whitespace', () => {
-    expect(cleanCellText('  A &amp; B\n  &nbsp; C  ')).toBe('A & B C');
-    expect(cleanCellText('&lt;x&gt; &#39;q&#39; &quot;d&quot;')).toBe("<x> 'q' \"d\"");
+  it('collapses runs of whitespace and trims', () => {
+    expect(cleanCellText('  A & B\n  \u00a0 C  ')).toBe('A & B C');
+    expect(cleanCellText('\t\n')).toBe('');
+  });
+
+  it('leaves entity-looking text alone — the parser has already decoded the cell', () => {
+    // Both callers pass node-html-parser's `.text`, which is decoded once. A
+    // literal "&amp;" surviving in that text was "&amp;amp;" in the HTML, so
+    // decoding it again would corrupt what the practice actually wrote.
+    expect(cleanCellText('a &amp; b')).toBe('a &amp; b');
   });
 });
 
@@ -47,5 +54,35 @@ describe('stripUrlishKeys', () => {
         Size: 10,
       }),
     ).toEqual({ FileName: 'a.pdf', Size: 10 });
+  });
+
+  it('strips each URL/secret-shaped name, whole or as a case segment', () => {
+    const stripped = [
+      'FilePath',
+      'FileUrl',
+      'Url',
+      'URL',
+      'Uri',
+      'Src',
+      'Source',
+      'Link',
+      'Href',
+      'Token',
+      'Secret',
+      'Key',
+      'AccessKey',
+      'SasToken',
+      'Signature',
+      'DownloadUrl',
+      'url',
+      'file_path',
+      'S3URL',
+    ];
+    for (const k of stripped) expect(stripUrlishKeys({ [k]: 'x' }), k).toEqual({});
+  });
+
+  it('keeps names that merely contain a token as a substring', () => {
+    const kept = { Monkey: 1, Description: 2, FileName: 3, FileNotExit: 4, Index: 5, Keyboard: 6, Pathway: 7 };
+    expect(stripUrlishKeys(kept)).toEqual(kept);
   });
 });

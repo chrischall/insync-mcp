@@ -1,15 +1,18 @@
 // The one upload tool: an insurance-card image POSTed to the patient's own
 // InSync profile. It is NOT read-only — the practice sees the uploaded image
 // and there is no delete/undo through this server — so it is annotated
-// destructive and gated by `confirmWrite`: the first call reads nothing from the
-// portal, returns a preview + confirmToken, and only a repeat call with that
-// token (after the user approved the preview) actually uploads.
+// destructive and confirm-gated like the other writes (`defineWrite` +
+// `registerWrite`): the first call reads nothing from the portal, returns a
+// preview + confirmToken, and only a repeat call with that token (after the
+// user approved the preview) actually uploads. The upload goes through
+// `sendOnce`, so a 5xx or a dropped connection after sending is reported as
+// `status: "unknown"` rather than an error that reads as safe to retry.
 //
 // Two safety boundaries before a byte leaves the machine:
 //   * vetUploadFile confines the source path to the allowed roots, refuses a
 //     symlink / non-image / oversize file, and reads the bytes from the one
 //     vetted descriptor (so nothing can be swapped in after the checks);
-//   * confirmWrite binds the exact bytes + the shown preview into the token, so
+//   * the write gate binds the exact bytes + the shown preview into the token, so
 //     a file (or argument) that changed between the preview and the confirmed
 //     call is refused as DRAFT_CHANGED.
 //
@@ -21,20 +24,17 @@
 import { join } from 'node:path';
 import { z } from 'zod';
 import {
-  CONFIRM_FLOW_SENTENCE,
-  CONFIRM_INJECTION_RULE,
   McpToolError,
-  confirmTokenParam,
-  confirmWrite,
-  minifiedResult,
+  defineWrite,
   readEnvVar,
-  toolAnnotations,
+  registerWrite,
   vetUploadFile,
   type EnvSource,
   type VettedUpload,
 } from '@chrischall/mcp-utils';
 import type { McpServer } from '@modelcontextprotocol/server';
 import type { InsyncClient } from '../client.js';
+import { WRITE, compactResult, sendOnce, writeDescription } from './_writes.js';
 
 /** The image types the portal accepts, lower-case extension → the MIME it is sent as. */
 export const UPLOAD_MIME_BY_EXT: Readonly<Record<string, string>> = {
@@ -112,18 +112,17 @@ export function registerUploadTools(
   const allowedRoots = opts.allowedRoots;
   const maxBytes = opts.maxBytes ?? MAX_UPLOAD_BYTES;
 
-  server.registerTool(
-    'insync_upload_insurance_card',
-    {
-      description:
+  registerWrite(
+    server,
+    defineWrite({
+      name: 'insync_upload_insurance_card',
+      description: writeDescription(
         'Upload a photo of your insurance card (front, back, or both) to your own InSync ' +
-        'patient profile, from a local image file (JPG, JPEG or PNG). This WRITES to the portal: ' +
-        'the practice sees the uploaded image and there is no delete or undo through this server, ' +
-        'so it is irreversible. ' +
-        CONFIRM_FLOW_SENTENCE +
-        ' ' +
-        CONFIRM_INJECTION_RULE,
-      annotations: toolAnnotations({ readOnly: false, destructive: true, openWorld: true }),
+          'patient profile, from a local image file (JPG, JPEG or PNG). This WRITES to the portal: ' +
+          'the practice sees the uploaded image and there is no delete or undo through this server, ' +
+          'so it is irreversible.',
+      ),
+      annotations: WRITE,
       inputSchema: z.object({
         side: z
           .enum(['front', 'back', 'both'])
@@ -136,67 +135,76 @@ export function registerUploadTools(
           .string()
           .optional()
           .describe('Local path to the BACK image (JPG/JPEG/PNG). Required for side back or both.'),
-        confirmToken: confirmTokenParam,
       }),
-    },
-    async ({ side, front_path, back_path, confirmToken }, ctx) => {
-      const want = sidesFor(side);
-      if (want.front && (front_path === undefined || front_path === '')) {
-        throw new McpToolError('front_path is required to upload the front of the card.', {
-          hint: 'Pass front_path (a local JPG/JPEG/PNG), or use side="back" to upload only the back.',
-        });
-      }
-      if (want.back && (back_path === undefined || back_path === '')) {
-        throw new McpToolError('back_path is required to upload the back of the card.', {
-          hint: 'Pass back_path (a local JPG/JPEG/PNG), or use side="front" to upload only the front.',
-        });
-      }
+      async plan({ side, front_path, back_path }) {
+        const want = sidesFor(side);
+        if (want.front && (front_path === undefined || front_path === '')) {
+          throw new McpToolError('front_path is required to upload the front of the card.', {
+            hint: 'Pass front_path (a local JPG/JPEG/PNG), or use side="back" to upload only the back.',
+          });
+        }
+        if (want.back && (back_path === undefined || back_path === '')) {
+          throw new McpToolError('back_path is required to upload the back of the card.', {
+            hint: 'Pass back_path (a local JPG/JPEG/PNG), or use side="front" to upload only the front.',
+          });
+        }
 
-      // Vet (and read) the files BEFORE anything is shown or sent. On the preview
-      // call this only touches the local filesystem — no portal request is made.
-      const vet = (path: string): Promise<VettedUpload> =>
-        vetUploadFile(path, { mimeByExt: UPLOAD_MIME_BY_EXT, maxBytes, allowedRoots, readAll: true });
-      const front = want.front ? await vet(front_path as string) : undefined;
-      const back = want.back ? await vet(back_path as string) : undefined;
+        // Vet (and read) the files BEFORE anything is shown or sent. Planning
+        // only touches the local filesystem — no portal request is made.
+        const vet = (path: string): Promise<VettedUpload> =>
+          vetUploadFile(path, { mimeByExt: UPLOAD_MIME_BY_EXT, maxBytes, allowedRoots, readAll: true });
+        const front = want.front ? await vet(front_path as string) : undefined;
+        const back = want.back ? await vet(back_path as string) : undefined;
 
-      const body = buildInsuranceForm({ front: front?.bytes, back: back?.bytes });
-      const files = [
-        ...(front ? [{ side: 'front', name: front.requested, type: front.mime, size: front.size }] : []),
-        ...(back ? [{ side: 'back', name: back.requested, type: back.mime, size: back.size }] : []),
-      ];
+        const body = buildInsuranceForm({ front: front?.bytes, back: back?.bytes });
+        const files = [
+          ...(front ? [{ side: 'front', name: front.requested, type: front.mime, size: front.size }] : []),
+          ...(back ? [{ side: 'back', name: back.requested, type: back.mime, size: back.size }] : []),
+        ];
 
-      // Gate on EVERY call with the request rebuilt from the current arguments.
-      // The exact bytes (request.body) AND the shown preview are bound into the
-      // token, so a file or argument that changed since the preview is refused as
-      // DRAFT_CHANGED. `willSend` keeps the base64 out of the preview the user
-      // reads, while the real body stays bound. The anti-forgery token is NOT
-      // bound — client.upload mints a fresh one for whichever session is live.
-      const label = side === 'both' ? 'front and back' : side;
-      const gate = await confirmWrite(ctx, {
-        tool: 'insync_upload_insurance_card',
-        action: 'insync.upload_insurance_card',
-        summary: `Upload your insurance card (${label}) to your InSync profile`,
-        account: undefined,
-        target: side,
-        request: { method: 'POST', path: 'PatientProfile/SaveInsuranceCardImages', body },
-        willSend: { files },
-        preview: {
-          warning:
-            'This uploads to your InSync profile; the practice can see it and this server cannot ' +
-            'remove it.',
-        },
-        args: { side, front_path, back_path },
-        confirmToken,
-      });
-      if (gate) return gate;
-
-      const result = await client.upload('PatientProfile/SaveInsuranceCardImages', body);
-      return minifiedResult({
-        uploaded: files.map((f) => ({ side: f.side, name: f.name, size: f.size })),
-        status: result.status,
-        note: 'The image is now on your InSync profile and visible to the practice; this server ' +
-          'cannot remove it.',
-      });
-    },
+        // `plan` runs on EVERY call, so the gate is rebuilt from the current
+        // arguments and files. registerWrite hands the whole gate to
+        // confirmWrite: the exact bytes (request.body) AND the shown preview are
+        // bound into the token, so a file or argument that changed since the
+        // preview is refused as DRAFT_CHANGED. `willSend` keeps the base64 out
+        // of the preview the user reads, while the real body stays bound. The
+        // anti-forgery token is NOT bound — client.upload mints a fresh one for
+        // whichever session is live.
+        const label = side === 'both' ? 'front and back' : side;
+        return {
+          gate: {
+            action: 'insync.upload_insurance_card',
+            summary: `Upload your insurance card (${label}) to your InSync profile`,
+            account: undefined,
+            target: side,
+            request: { method: 'POST', path: 'PatientProfile/SaveInsuranceCardImages', body },
+            willSend: { files },
+            preview: {
+              warning:
+                'This uploads to your InSync profile; the practice can see it and this server cannot ' +
+                'remove it.',
+            },
+          },
+          state: { body, files },
+        };
+      },
+      async execute({ body, files }) {
+        return sendOnce(
+          async () => {
+            const result = await client.upload('PatientProfile/SaveInsuranceCardImages', body);
+            return {
+              uploaded: files.map((f) => ({ side: f.side, name: f.name, size: f.size })),
+              status: result.status,
+              note:
+                'The image is now on your InSync profile and visible to the practice; this server ' +
+                'cannot remove it.',
+            };
+          },
+          'insurance-card upload',
+          'your InSync profile',
+        );
+      },
+      render: compactResult,
+    }),
   );
 }

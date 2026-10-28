@@ -275,6 +275,16 @@ describe('insync_cancel_appointment', () => {
     await expect(late.cancel.raw(args)).rejects.toThrow(/cancellation period .*has passed/);
   });
 
+  it('says the list was cut short, not that the visit is not upcoming, when TotalRows exceeds the rows', async () => {
+    const big = { currentAppointment: { ...FUTURE.currentAppointment, TotalRows: '150' } };
+    const r = rig({ 'PatientScheduler/FutureAppiontmentDetails': okJson(big) });
+    await expect(r.cancel.raw({ ...args, visit_id: '1' })).rejects.toThrow(
+      'Could not find visit 1: you have 150 upcoming appointments and only 2 were checked.',
+    );
+    // A complete page (TotalRows equal to the rows) keeps the plain "not upcoming" answer.
+    await expect(rig().cancel.raw({ ...args, visit_id: '1' })).rejects.toThrow(/not one of your upcoming/);
+  });
+
   it('on confirm posts the cancellation request once with the reason', async () => {
     const r = rig();
     const out = jsonOf(await r.cancel.confirmed(args));

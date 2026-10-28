@@ -21,6 +21,7 @@ import { createCookieSessionManager, type CookieSessionManager } from '@chrischa
 import { isSignedOut } from './client.js';
 import { SecretScrubber } from './secrets.js';
 import {
+  formBody,
   NotAcceptedError,
   parsePortal,
   PermanentTransportError,
@@ -62,11 +63,32 @@ function cookieHeader(jar: Map<string, string>): string {
   return [...jar].map(([k, v]) => `${k}=${v}`).join('; ');
 }
 
+// Whether a Set-Cookie line's attributes delete the cookie: `Max-Age` <= 0, or
+// (absent Max-Age, which takes precedence per RFC 6265 §5.3) an `Expires` in
+// the past. That is how the portal clears a cookie on sign-out; without this
+// the jar would keep resending a value the server meant to drop. Domain and
+// Path are still ignored — every request goes to the one pinned portal host.
+function isDeletion(attributes: string[]): boolean {
+  const attrs = new Map<string, string>();
+  for (const attr of attributes) {
+    const eq = attr.indexOf('=');
+    const name = (eq < 0 ? attr : attr.slice(0, eq)).trim().toLowerCase();
+    attrs.set(name, eq < 0 ? '' : attr.slice(eq + 1).trim());
+  }
+  const maxAge = attrs.get('max-age');
+  if (maxAge !== undefined) return Number(maxAge) <= 0;
+  const expires = attrs.get('expires');
+  return expires !== undefined && Date.parse(expires) <= Date.now();
+}
+
 function absorb(headers: Headers, jar: Map<string, string>): void {
   for (const line of headers.getSetCookie()) {
-    const pair = line.split(';')[0];
+    const [pair, ...attributes] = line.split(';');
     const eq = pair.indexOf('=');
-    if (eq > 0) jar.set(pair.slice(0, eq).trim(), pair.slice(eq + 1));
+    if (eq <= 0) continue;
+    const name = pair.slice(0, eq).trim();
+    if (isDeletion(attributes)) jar.delete(name);
+    else jar.set(name, pair.slice(eq + 1));
   }
 }
 
@@ -93,6 +115,10 @@ export class ServerTransport implements InsyncTransport {
   constructor(private readonly opts: ServerTransportOptions) {
     /* v8 ignore next */
     this.doFetch = opts.fetchImpl ?? ((input, init) => fetch(input, init));
+    // Register the password as a scrub needle up front, not after a successful
+    // login: a failed or half-finished sign-in can still surface an error, and
+    // the password must already be redacted from it.
+    opts.scrubber.add(opts.password);
     this.sessions = createCookieSessionManager<InsyncSession, FetchResult>({
       login: () => this.login(),
       isExpired: (res) => isSignedOut(res),
@@ -144,7 +170,7 @@ export class ServerTransport implements InsyncTransport {
     form: Record<string, string> | URLSearchParams,
     opts: RequestOptions = {},
   ): Promise<FetchResult> {
-    const body = form instanceof URLSearchParams ? form.toString() : new URLSearchParams(form).toString();
+    const body = formBody(form);
     return this.request({
       method: 'POST',
       path,
@@ -188,7 +214,7 @@ export class ServerTransport implements InsyncTransport {
     spec: RequestSpec,
   ): Promise<BinaryFetchResult> {
     let url = new URL(spec.path, `${this.portal().origin}/`);
-    if (!url.hostname.endsWith('.insynchcs.com')) {
+    if (!this.onPortal(url)) {
       throw new McpToolError('Refusing to download from a host outside the InSync portal.', {
         hint: 'InSync file downloads go only through the portal, never direct storage (S3).',
       });
@@ -215,7 +241,7 @@ export class ServerTransport implements InsyncTransport {
         if (/\/Login/i.test(next.pathname)) {
           return { status: res.status, body: '', bytes: new Uint8Array(), url: location, contentType };
         }
-        if (!next.hostname.endsWith('.insynchcs.com')) {
+        if (!this.onPortal(next)) {
           throw new McpToolError('InSync redirected the download off the portal domain.', {
             hint: 'File downloads go only through the portal, never direct storage (S3).',
           });
@@ -252,6 +278,14 @@ export class ServerTransport implements InsyncTransport {
   private portal(): PortalInfo {
     if (this.portalInfo === undefined) this.portalInfo = parsePortal(this.opts.portal);
     return this.portalInfo;
+  }
+
+  // Whether a URL is on exactly this practice's portal origin (scheme, host and
+  // port). Every practice shares the insynchcs.com suffix, so a suffix check
+  // would hand this session's cookie jar to ANOTHER practice's portal on a
+  // redirect; and pinning the scheme keeps the cookies off plain http.
+  private onPortal(url: URL): boolean {
+    return url.origin === this.portal().origin;
   }
 
   private async doRequest(jar: Map<string, string>, spec: RequestSpec): Promise<FetchResult> {
@@ -346,7 +380,6 @@ export class ServerTransport implements InsyncTransport {
       s3.bucketName,
       s3.regionEndpoint,
       s3.practiceFolderName,
-      password,
     );
     return { jar, s3 };
   }
@@ -420,7 +453,7 @@ export class ServerTransport implements InsyncTransport {
       if (res.status < 300 || res.status >= 400) return;
       if (res.url === undefined) return;
       const next = new URL(res.url, current);
-      if (!next.hostname.endsWith('.insynchcs.com')) {
+      if (!this.onPortal(next)) {
         throw new McpToolError('InSync sign-in redirected off the portal domain.', {
           hint: API_HINT,
         });

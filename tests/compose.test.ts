@@ -217,6 +217,13 @@ describe('insync_reply_message', () => {
     expect(preview.confirmToken).toEqual(expect.any(String));
   });
 
+  it('refuses a reply when the unread listing was truncated and the message was not seen', async () => {
+    const truncated = okJson({ recordsTotal: 300, data: [{ TODOChildId: 1, TODOMasterId: 2 }] });
+    const r = rig({ 'Messages/GetMessages': truncated });
+    await expect(r.reply.raw(args)).rejects.toThrow(/Could not confirm whether this message is unread/);
+    expect(r.transport.calls.map((c) => c.path.split('?')[0])).toEqual(['Messages/GetMessages']);
+  });
+
   it('refuses when the sender is no longer with the practice, or the form is missing', async () => {
     const inactive = REPLY_FORM.replace('value="Care Team"', 'value=""');
     await expect(rig({ 'Messages/GetComposeDetailForReply': okText(inactive) }).reply.raw(args)).rejects.toThrow(

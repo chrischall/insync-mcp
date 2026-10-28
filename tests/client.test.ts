@@ -72,7 +72,7 @@ const LOGIN = '<html><head><title>Portal :: Login</title></head><body></body></h
 
 function client(
   responder: (call: Call) => FetchResult,
-  opts: { mode?: TransportMode; scrubber?: SecretScrubber } = {},
+  opts: { mode?: TransportMode; scrubber?: SecretScrubber; portalHost?: string } = {},
 ): { c: InsyncClient; t: FakeTransport } {
   const t = new FakeTransport(responder);
   return { c: new InsyncClient({ transport: t, ...opts }), t };
@@ -282,6 +282,34 @@ describe('InsyncClient file transfer', () => {
     );
   });
 
+  it('refuses a protocol-relative path, which resolves off the portal', async () => {
+    const { c, t } = client(() => ok('{}'));
+    await expect(c.downloadAttachment('//evil.example/x')).rejects.toThrow(/outside the InSync portal/);
+    const pinned = client(() => ok('{}'), { portalHost: 'pfb.insynchcs.com' });
+    await expect(pinned.c.downloadAttachment('//evil.example/x')).rejects.toThrow(
+      /outside the InSync portal/,
+    );
+    expect([...t.calls, ...pinned.t.calls]).toEqual([]);
+  });
+
+  it('pins downloads to the configured portal host', async () => {
+    const { c, t } = client(() => ok('{}'), { portalHost: 'pfb.insynchcs.com' });
+    t.binary = { status: 200, body: '', bytes: bytes('PDF') };
+    await c.downloadAttachment('/DocumentManager/DownloadFile.ashx?f=1');
+    await c.downloadAttachment('https://pfb.insynchcs.com/DocumentManager/DownloadFile.ashx?f=2');
+    expect(t.calls.map((x) => x.path)).toEqual([
+      '/DocumentManager/DownloadFile.ashx?f=1',
+      'https://pfb.insynchcs.com/DocumentManager/DownloadFile.ashx?f=2',
+    ]);
+    // Another practice's portal is still off-portal once the host is known.
+    await expect(c.downloadAttachment('https://other.insynchcs.com/x')).rejects.toThrow(
+      /outside the InSync portal/,
+    );
+    await expect(c.downloadAttachment('//other.insynchcs.com/x')).rejects.toThrow(
+      /outside the InSync portal/,
+    );
+  });
+
   it('refuses an unparseable absolute attachment path', async () => {
     const { c } = client(() => ok('{}'));
     await expect(c.downloadAttachment('http://')).rejects.toThrow(/not a valid URL/);
@@ -379,6 +407,57 @@ describe('InsyncClient write lookups', () => {
     ]);
   });
 
+  describe('unread lookup', () => {
+    const row = { TODOChildId: 11, TODOMasterId: 22, TaskSubject: 'x' };
+    const listing = (body: Record<string, unknown>) => client(() => ok(JSON.stringify(body)));
+
+    it('lists the unread folder (200 rows) and finds a row by its child and master ids', async () => {
+      const { c, t } = listing({ recordsTotal: 1, data: [row] });
+      expect(await c.isUnread('11', '22')).toBe(true);
+      expect(await c.findUnreadMessage('11', '22')).toEqual(row);
+      expect(t.calls[0]!.path).toMatch(/^Messages\/GetMessages\?/);
+      expect(t.calls[0]!.path).toContain('messageType=1');
+      expect(t.calls[0]!.path).toContain('length=200');
+    });
+
+    it('needs BOTH ids to match', async () => {
+      const { c } = listing({ recordsTotal: 1, data: [row] });
+      expect(await c.isUnread('11', '99')).toBe(false);
+      expect(await c.isUnread('99', '22')).toBe(false);
+    });
+
+    it('skips rows that are not records', async () => {
+      const { c } = listing({ recordsTotal: 3, data: [null, 5, row] });
+      expect(await c.isUnread('11', '22')).toBe(true);
+    });
+
+    it('answers false when the complete listing has no match', async () => {
+      const { c } = listing({ recordsTotal: 1, data: [row] });
+      expect(await c.isUnread('12', '22')).toBe(false);
+    });
+
+    it('treats a listing with no recordsTotal (or a non-numeric one) as complete', async () => {
+      expect(await listing({ data: [row] }).c.isUnread('12', '22')).toBe(false);
+      expect(await listing({ recordsTotal: 'many', data: [row] }).c.isUnread('12', '22')).toBe(false);
+      expect(await listing({}).c.isUnread('12', '22')).toBe(false);
+      expect(await client(() => ok('[]')).c.isUnread('12', '22')).toBe(false);
+    });
+
+    it('fails closed when the listing was truncated and no row matched', async () => {
+      const { c } = listing({ recordsTotal: '250', data: [row] });
+      await expect(c.isUnread('12', '22')).rejects.toMatchObject({
+        message:
+          'Could not confirm whether this message is unread: the unread folder has 250 messages and only 1 were checked.',
+        hint: expect.stringMatching(/allow_mark_read=true.*does not page/s),
+      });
+    });
+
+    it('still finds a match on a truncated listing', async () => {
+      const { c } = listing({ recordsTotal: 250, data: [row] });
+      expect(await c.isUnread('11', '22')).toBe(true);
+    });
+  });
+
   it('reads the cancellation-window check as a trimmed code', async () => {
     const { c, t } = client(() => ok(' 2\n'));
     expect(await c.checkCancelWindow('42')).toBe('2');
@@ -448,6 +527,27 @@ describe('InsyncClient writes', () => {
     await expect(client(withToken({ status: 404, body: '' })).c.submitFormJson('X/Y', {})).rejects.toThrow(
       /HTTP 404/,
     );
+  });
+
+  it('uploads through the write-status guard: 5xx is UNKNOWN, 4xx applied nothing', async () => {
+    const five = client(withToken({ status: 500, body: '<html><title>Server Error</title></html>' }));
+    const fiveRun = five.c.upload('PatientProfile/SaveInsuranceCardImages', { a: '1' });
+    await expect(fiveRun).rejects.toBeInstanceOf(WriteOutcomeUnknownError);
+    await expect(fiveRun).rejects.toMatchObject({ hint: expect.stringMatching(/HTTP 500/) });
+    const four = client(withToken({ status: 400, body: '' })).c.upload('X/Y', {});
+    await expect(four).rejects.toThrow(/refused X\/Y with HTTP 400/);
+    await expect(four).rejects.toMatchObject({ hint: expect.stringMatching(/Nothing was applied/) });
+    await expect(four).rejects.not.toBeInstanceOf(WriteOutcomeUnknownError);
+  });
+
+  it('accepts an upload by Success or by Status "1", and refuses anything else', async () => {
+    const byFlag = client(withToken(ok('{"Success":true}')));
+    expect(await byFlag.c.upload('X/Y', { a: '1' })).toEqual({ status: undefined });
+    expect(byFlag.t.calls[1]).toMatchObject({ verb: 'postForm', opts: { replay: false } });
+    expect(await client(withToken(ok('{"Status":1}'))).c.upload('X/Y', {})).toEqual({ status: '1' });
+    await expect(
+      client(withToken(ok('{"Success":false,"Status":"0"}'))).c.upload('X/Y', {}),
+    ).rejects.toThrow(/did not accept the upload/);
   });
 
   it('submits JSON once, never replayed, and parses the answer', async () => {

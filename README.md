@@ -99,8 +99,8 @@ See [`docs/INSYNC-API.md`](docs/INSYNC-API.md).
 
 ## Confirm gate
 
-Every write is gated by `@chrischall/mcp-utils`' `confirmWrite` (the
-send/request tools through its `defineWrite` / `registerWrite`). The first call
+Every write is gated by `@chrischall/mcp-utils`' `confirmWrite`, through its
+`defineWrite` / `registerWrite`. The first call
 sends nothing and returns a **preview + a `confirmToken`**; only a second call
 carrying that token — after you approve the preview — sends. The send/request
 tools may read the portal while previewing (to resolve names and check the slot

@@ -78,6 +78,11 @@ case "$cmd" in
              date: .ReminderDateText, attachments: .TotalAttachments}]}' ;;
   message)       # <childId> <masterId>  — opening an UNREAD message marks it read
     [ $# -ge 2 ] || die "message <childId> <masterId>"
+    # Both ids go into the query string verbatim, so accept digits only (the
+    # MCP's NumericIdString) rather than let an id smuggle in extra params.
+    for id in "$1" "$2"; do
+      case "$id" in ''|*[!0-9]*) die "message <childId> <masterId> — ids must be digits only" ;; esac
+    done
     get "/Messages/GetMessageDetail?toDoChildId=$1&todoMasaterId=$2&type=inbox" |
       jq '{practice: .PracticeName,
            subject: .MessageDetail.TaskSubject,

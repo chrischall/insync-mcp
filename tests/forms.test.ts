@@ -34,6 +34,22 @@ describe('inputValue', () => {
   it('does not match an id that merely starts with the one asked for', () => {
     expect(inputValue('<input id="todoChildIdX" value="9">', 'todoChildId')).toBeUndefined();
   });
+
+  it('is not fooled by a data-id / data-value on an unrelated element', () => {
+    // `\bid=` used to match inside `data-id=`, and `\bvalue=` inside
+    // `data-value=` — jQuery/Bootstrap partials carry data-* attributes freely.
+    const html = '<div data-id="todoMasterId" data-value="WRONG"></div><input id="todoMasterId" value="RIGHT">';
+    expect(inputValue(html, 'todoMasterId')).toBe('RIGHT');
+    expect(inputValue('<input id="x" data-value="WRONG">', 'x')).toBeUndefined();
+    expect(inputValue('<input data-id="x" value="WRONG">', 'x')).toBeUndefined();
+  });
+
+  it('reads the element carrying the id even when it is not an <input>', () => {
+    // jQuery's $('#id').val() reads whatever element has the id; a non-input
+    // without a value attribute has no value to give.
+    expect(inputValue('<span id="todoChildId">111</span><input name="todoChildId" value="9">', 'todoChildId')).toBeUndefined();
+    expect(inputValue('<button id="btn" value="go">Go</button>', 'btn')).toBe('go');
+  });
 });
 
 describe('selectOptions', () => {
@@ -47,6 +63,24 @@ describe('selectOptions', () => {
   it('is empty for an empty or missing select', () => {
     expect(selectOptions(FORM, 'ddlEmpty')).toEqual([]);
     expect(selectOptions(FORM, 'nope')).toEqual([]);
+  });
+
+  it('is not fooled by a data-id on another select', () => {
+    const html =
+      '<select data-id="ddl"><option value="1">Wrong</option></select>' +
+      '<select id="ddl"><option value="2">Right</option></select>';
+    expect(selectOptions(html, 'ddl')).toEqual([{ value: '2', text: 'Right' }]);
+  });
+
+  it('is empty when the id belongs to something other than a <select>', () => {
+    expect(selectOptions('<div id="ddl"><option value="1">x</option></div>', 'ddl')).toEqual([]);
+  });
+
+  it('skips an option without a value attribute (a data-value is not one)', () => {
+    const html =
+      '<select id="ddl"><option>-- choose --</option><option data-value="9">Fake</option>' +
+      '<option value="3"> Three &lt;3mg&gt; </option></select>';
+    expect(selectOptions(html, 'ddl')).toEqual([{ value: '3', text: 'Three <3mg>' }]);
   });
 });
 

@@ -1,11 +1,11 @@
 import { z } from 'zod';
-import { todayIso } from '@chrischall/mcp-utils';
+import { IsoDate, todayIso } from '@chrischall/mcp-utils';
 import type { McpServer } from '@modelcontextprotocol/server';
 import type { InsyncClient } from '../client.js';
 import { READ, asRecord, asRecordArray, tidy } from './_shared.js';
 import { viewArg, viewResponse } from '../view.js';
 
-/** ISO `YYYY-MM-DD` → the portal's `MM/DD/YYYY`. The schema has already validated the shape. */
+/** ISO `YYYY-MM-DD` → the portal's `MM/DD/YYYY`. The schema has already validated it as a real calendar date. */
 export function isoToMdy(iso: string): string {
   const [year, month, day] = iso.split('-');
   return `${month}/${day}/${year}`;
@@ -17,10 +17,6 @@ export function monthRange(iso: string): { from: string; to: string } {
   const lastDay = new Date(Date.UTC(Number(year), Number(month), 0)).getUTCDate();
   return { from: `${year}-${month}-01`, to: `${year}-${month}-${String(lastDay).padStart(2, '0')}` };
 }
-
-const ISO_DATE = z
-  .string()
-  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use an ISO date, YYYY-MM-DD.');
 
 export function registerAppointmentTools(server: McpServer, client: InsyncClient): void {
   server.registerTool(
@@ -80,10 +76,10 @@ export function registerAppointmentTools(server: McpServer, client: InsyncClient
         'scheduled visit in a date range. Defaults to the current month when no range is given.',
       annotations: READ,
       inputSchema: z.object({
-        from: ISO_DATE.optional().describe(
+        from: IsoDate.optional().describe(
           'Range start (ISO YYYY-MM-DD). Defaults to the first day of the current month.',
         ),
-        to: ISO_DATE.optional().describe(
+        to: IsoDate.optional().describe(
           'Range end (ISO YYYY-MM-DD). Defaults to the last day of the current month.',
         ),
         view: viewArg(),

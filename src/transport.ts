@@ -112,6 +112,15 @@ export class NotAcceptedError extends McpToolError {
   }
 }
 
+/**
+ * Encode a form body. A `URLSearchParams` passes through as-is (it may carry
+ * repeated keys); a plain record is wrapped first. Shared by both transports'
+ * `postForm`.
+ */
+export function formBody(form: Record<string, string> | URLSearchParams): string {
+  return (form instanceof URLSearchParams ? form : new URLSearchParams(form)).toString();
+}
+
 /** A validated `INSYNC_PORTAL`: its origin, host and practice subdomain. */
 export interface PortalInfo {
   origin: string;

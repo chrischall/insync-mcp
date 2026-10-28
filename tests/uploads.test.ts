@@ -264,6 +264,32 @@ describe('insync_upload_insurance_card — the confirmed upload', () => {
     expect(out.error).toBe('DRAFT_CHANGED');
   });
 
+  it('reports an unknown outcome (not an error) when the save answers a 5xx', async () => {
+    // The bytes may have landed before the backend failed: the confirm token is
+    // spent, so a throw that reads as "safe to retry" would upload twice.
+    const fiveHundred = (c: FakeCall): FetchResult =>
+      c.path.endsWith('SaveInsuranceCardImages') ? { status: 502, body: 'Bad Gateway' } : happy(c);
+    const t = tool(fiveHundred, { allowedRoots: [root] });
+    const out = await t.confirmed({ side: 'front', front_path: write('card.png', PNG) });
+    expect(out.status).toBe('unknown');
+    expect(out.warning).toMatch(/did not confirm this insurance-card upload/);
+    expect(out.warning).toMatch(/your InSync profile/);
+    expect(out.uploaded).toBeUndefined();
+    // Sent exactly once — never retried.
+    expect(t.transport.calls.filter((c) => c.path.endsWith('SaveInsuranceCardImages'))).toHaveLength(1);
+  });
+
+  it('reports an unknown outcome when the connection drops during the save', async () => {
+    const dropped = (c: FakeCall): FetchResult => {
+      if (c.path.endsWith('SaveInsuranceCardImages')) throw new Error('socket hang up');
+      return happy(c);
+    };
+    const t = tool(dropped, { allowedRoots: [root] });
+    const out = await t.confirmed({ side: 'front', front_path: write('card.png', PNG) });
+    expect(out.status).toBe('unknown');
+    expect(out.warning).toMatch(/may already have gone through/);
+  });
+
   it('surfaces a portal rejection without claiming success', async () => {
     const reject = (c: FakeCall): FetchResult =>
       c.path.endsWith('SaveInsuranceCardImages')

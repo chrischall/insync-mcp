@@ -1,10 +1,11 @@
 import { z } from 'zod';
-import { toolAnnotations, untrustedResult } from '@chrischall/mcp-utils';
+import { untrustedResult } from '@chrischall/mcp-utils';
 import { htmlToReadableText } from '@chrischall/mcp-utils/html';
 import type { McpServer } from '@modelcontextprotocol/server';
 import type { InsyncClient, MessageFolder } from '../client.js';
-import { READ, asRecord, asRecordArray, sameId, stripUrlishKeys, tidy } from './_shared.js';
+import { READ, asRecord, asRecordArray, stripUrlishKeys, tidy } from './_shared.js';
 import { ASSEMBLED_VIEWS, assembledViewArg, untrustedViewResponse } from '../view.js';
+import { WRITE } from './_writes.js';
 
 const WROTE_SUBJECTS = 'Message subjects and senders are written by your practice.';
 const WROTE_BODY = 'This message was written by your practice.';
@@ -96,7 +97,7 @@ export function registerMessageTools(server: McpServer, client: InsyncClient): v
         'practice can see that, and it cannot be undone. An unread message is NOT opened unless ' +
         'allow_mark_read is true; without it the tool returns the message’s metadata and a ' +
         'note asking you to confirm with the user first. An already-read message is opened freely.',
-      annotations: toolAnnotations({ readOnly: false, destructive: true, openWorld: true }),
+      annotations: WRITE,
       inputSchema: z.object({
         child_id: z.string().min(1).describe('TODOChildId of the message, from insync_list_messages.'),
         master_id: z
@@ -114,10 +115,8 @@ export function registerMessageTools(server: McpServer, client: InsyncClient): v
     },
     async ({ child_id, master_id, allow_mark_read, view }) => {
       if (!allow_mark_read) {
-        const unread = await client.listMessages({ folder: 'unread', length: 200 });
-        const match = asRecordArray(asRecord(unread).data).find(
-          (r) => sameId(r.TODOChildId, child_id) && sameId(r.TODOMasterId, master_id),
-        );
+        // Throws (fails closed) when the unread folder is too long to tell.
+        const match = await client.findUnreadMessage(child_id, master_id);
         if (match !== undefined) {
           return untrustedResult(
             {
