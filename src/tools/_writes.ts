@@ -51,7 +51,7 @@ export async function sendOnce<T>(
   return outcome.ok ? outcome.value : outcome.result;
 }
 
-/** The single tool's result: compact JSON. */
-export function renderWrite(result: unknown): CallToolResult {
+/** A tool's result as compact JSON. */
+export function compactResult(result: unknown): CallToolResult {
   return minifiedResult(result);
 }

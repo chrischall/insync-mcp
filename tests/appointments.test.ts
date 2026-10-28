@@ -88,6 +88,29 @@ describe('insync_list_appointments', () => {
 });
 
 describe('insync_get_appointment_calendar', () => {
+  /** The tool's registered input schema, for asserting what the SDK would reject. */
+  function calendarSchema(): { safeParse: (v: unknown) => { success: boolean } } {
+    let schema: unknown;
+    const server = {
+      registerTool: (name: string, def: { inputSchema: unknown }) => {
+        if (name === 'insync_get_appointment_calendar') schema = def.inputSchema;
+      },
+    };
+    registerAppointmentTools(server as never, {} as never);
+    return schema as { safeParse: (v: unknown) => { success: boolean } };
+  }
+
+  it('rejects a date that is not a real calendar date', () => {
+    const schema = calendarSchema();
+    // A bare digit-shape check let 2026-13-45 through, and monthRange then sent
+    // 2026-13-01..2026-13-31 to the portal.
+    expect(schema.safeParse({ from: '2026-13-45' }).success).toBe(false);
+    expect(schema.safeParse({ to: '2026-02-30' }).success).toBe(false);
+    expect(schema.safeParse({ from: '11/01/2026' }).success).toBe(false);
+    expect(schema.safeParse({ from: '2026-11-01', to: '2026-11-30' }).success).toBe(true);
+    expect(schema.safeParse({}).success).toBe(true);
+  });
+
   it('projects each day entry and totals', async () => {
     const { get } = rig(() => okJson(CALENDAR));
     const out = jsonOf(await get('insync_get_appointment_calendar')({ from: '2026-11-01', to: '2026-11-30' }));

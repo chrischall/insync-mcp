@@ -119,9 +119,9 @@ describe('insync_download_attachment', () => {
     expect(io.last?.fileName).toBe('home');
   });
 
-  it('names a nameless attachment "attachment" and tolerates a non-string path', async () => {
+  it('names a nameless attachment "attachment"', async () => {
     const io = new RecordingIO(true, (a) => ({ fileName: a.fileName, size: a.bytes.length, savedTo: `/out/${a.fileName}` }));
-    const rows = [{ FileName: '##_##http://x/y', FileNotExit: true }]; // no FilePath, empty display name
+    const rows = [{ FileName: '##_##http://x/y', FilePath: PORTAL_FILE, FileNotExit: true }]; // empty display name
     const { handlers } = setup({
       responder: () => okJson(rows),
       binaryResponder: () => okBin('X'),
@@ -129,7 +129,29 @@ describe('insync_download_attachment', () => {
     });
     await handlers.get('insync_download_attachment')!({ master_id: '9001', index: 0 });
     expect(io.last?.fileName).toBe('attachment');
-    expect(io.last?.url).toBe('');
+    expect(io.last?.url).toBe(PORTAL_FILE);
+  });
+
+  it('refuses an attachment with no download path, fetching no bytes', async () => {
+    // An empty path would resolve to the portal ROOT and deliver the dashboard
+    // page as "the attachment" — so a missing, empty or non-string FilePath is
+    // refused before any fetch.
+    for (const row of [
+      { FileName: 'a.pdf', FileNotExit: true },
+      { FileName: 'a.pdf', FilePath: '', FileNotExit: true },
+      { FileName: 'a.pdf', FilePath: 42, FileNotExit: true },
+    ]) {
+      const io = new RecordingIO(true, (a) => ({ fileName: a.fileName, size: a.bytes.length, savedTo: '/out/x' }));
+      const { handlers, transport } = setup({
+        responder: () => okJson([row]),
+        binaryResponder: () => okBin('<html>dashboard</html>'),
+        io,
+      });
+      const res = await handlers.get('insync_download_attachment')!({ master_id: '9001', index: 0 });
+      expect(JSON.parse(textOf(res))).toEqual({ error: 'That attachment has no download path.' });
+      expect(transport.calls.some((c) => c.verb === 'getBinary')).toBe(false);
+      expect(io.last).toBeUndefined();
+    }
   });
 
   it('inlines the bytes as base64 on a hosted (non-persisting) server', async () => {

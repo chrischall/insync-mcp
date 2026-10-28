@@ -14,7 +14,7 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import type { InsyncClient } from '../client.js';
 import { inputValue, selectOptions } from '../forms.js';
 import { READ } from './_shared.js';
-import { WRITE, renderWrite, sendOnce, writeDescription } from './_writes.js';
+import { WRITE, compactResult, sendOnce, writeDescription } from './_writes.js';
 
 export interface RefillOptions {
   practice: string | undefined;
@@ -74,7 +74,7 @@ export function registerRefillTools(server: McpServer, client: InsyncClient): vo
       annotations: READ,
       inputSchema: z.object({}),
     },
-    async () => renderWrite(parseRefillOptions(await client.getRefillForm())),
+    async () => compactResult(parseRefillOptions(await client.getRefillForm())),
   );
 
   registerWrite(
@@ -180,7 +180,7 @@ export function registerRefillTools(server: McpServer, client: InsyncClient): vo
           'insync_list_refill_requests',
         );
       },
-      render: renderWrite,
+      render: compactResult,
     }),
   );
 }

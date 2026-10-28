@@ -34,7 +34,7 @@ import {
 } from '@chrischall/mcp-utils';
 import type { McpServer } from '@modelcontextprotocol/server';
 import type { InsyncClient } from '../client.js';
-import { WRITE, renderWrite, sendOnce, writeDescription } from './_writes.js';
+import { WRITE, compactResult, sendOnce, writeDescription } from './_writes.js';
 
 /** The image types the portal accepts, lower-case extension → the MIME it is sent as. */
 export const UPLOAD_MIME_BY_EXT: Readonly<Record<string, string>> = {
@@ -204,7 +204,7 @@ export function registerUploadTools(
           'your InSync profile',
         );
       },
-      render: renderWrite,
+      render: compactResult,
     }),
   );
 }

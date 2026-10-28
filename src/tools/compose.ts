@@ -14,7 +14,7 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import type { InsyncClient } from '../client.js';
 import { htmlEscapeText, inputValue } from '../forms.js';
 import { READ, asRecord, asRecordArray, sameId } from './_shared.js';
-import { WRITE, renderWrite, sendOnce, writeDescription } from './_writes.js';
+import { WRITE, compactResult, sendOnce, writeDescription } from './_writes.js';
 
 /** The portal's own compose-screen disclaimer the user ticks before sending. */
 export const MESSAGE_DISCLAIMER =
@@ -126,7 +126,7 @@ export function registerComposeTools(server: McpServer, client: InsyncClient): v
       annotations: READ,
       inputSchema: z.object({}),
     },
-    async () => renderWrite(projectComposeDetail(await client.getComposeDetail())),
+    async () => compactResult(projectComposeDetail(await client.getComposeDetail())),
   );
 
   registerWrite(
@@ -183,7 +183,7 @@ export function registerComposeTools(server: McpServer, client: InsyncClient): v
           'your Sent folder (insync_list_messages folder=sent)',
         );
       },
-      render: renderWrite,
+      render: compactResult,
     }),
   );
 
@@ -266,7 +266,7 @@ export function registerComposeTools(server: McpServer, client: InsyncClient): v
           'your Sent folder (insync_list_messages folder=sent)',
         );
       },
-      render: renderWrite,
+      render: compactResult,
     }),
   );
 }

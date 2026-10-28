@@ -32,36 +32,21 @@ function isPresent(row: Record<string, unknown>): boolean {
 
 /** Render a completed download: the saved path, inline base64, or a too-large note. */
 function downloadResult(outcome: DownloadOutcome): CallToolResult {
+  const file = { file_name: outcome.fileName, mime_type: outcome.mimeType, size_bytes: outcome.size };
   if (outcome.savedTo !== undefined) {
-    return minifiedResult(
-      tidy({
-        saved_to: outcome.savedTo,
-        file_name: outcome.fileName,
-        mime_type: outcome.mimeType,
-        size_bytes: outcome.size,
-      }),
-    );
+    return minifiedResult(tidy({ saved_to: outcome.savedTo, ...file }));
   }
   if (outcome.tooLarge === true) {
     return minifiedResult(
       tidy({
-        file_name: outcome.fileName,
-        mime_type: outcome.mimeType,
-        size_bytes: outcome.size,
+        ...file,
         note:
           'This file is too large to return inline. Download it on a local install, where it ' +
           'writes to INSYNC_OUTPUT_DIR (or ~/Downloads).',
       }),
     );
   }
-  return minifiedResult(
-    tidy({
-      file_name: outcome.fileName,
-      mime_type: outcome.mimeType,
-      size_bytes: outcome.size,
-      base64: outcome.base64,
-    }),
-  );
+  return minifiedResult(tidy({ ...file, base64: outcome.base64 }));
 }
 
 export function registerDownloadTools(
@@ -147,6 +132,11 @@ export function registerDownloadTools(
       }
       const { fileName } = splitAttachmentName(row.FileName);
       const filePath = typeof row.FilePath === 'string' ? row.FilePath : '';
+      if (filePath === '') {
+        // An empty path resolves to the portal ROOT, which would deliver the
+        // dashboard page as "the attachment" — refuse instead of fetching it.
+        return minifiedResult({ error: 'That attachment has no download path.' });
+      }
       const res = await client.downloadAttachment(filePath);
       return downloadResult(
         io.deliver({

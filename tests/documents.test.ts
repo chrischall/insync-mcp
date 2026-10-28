@@ -92,6 +92,19 @@ describe('parseSurveyRows', () => {
     // The onclick token must never be surfaced.
     expect(JSON.stringify(rows)).not.toContain('TOKEN123');
   });
+
+  it('decodes entities exactly once through the parser and collapses whitespace', () => {
+    const html =
+      '<table><tr>' +
+      '<td> Intake &amp; Consent&nbsp;Form \n &lt;v2&gt; &#39;adult&#39; &quot;PHQ&quot; </td>' +
+      '<td>10/02/2026</td>' +
+      '</tr><tr><td>Fees &amp;amp; Policy</td><td>10/03/2026</td></tr></table>';
+    expect(parseSurveyRows(html)).toEqual([
+      { name: `Intake & Consent Form <v2> 'adult' "PHQ"`, received: '10/02/2026' },
+      // "&amp;amp;" is a literal "&amp;" in the source — decoded once, not twice
+      { name: 'Fees &amp; Policy', received: '10/03/2026' },
+    ]);
+  });
 });
 
 describe('insync_list_surveys', () => {

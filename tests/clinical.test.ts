@@ -94,6 +94,13 @@ describe('parseRefillGrid', () => {
     // header count, so it comes back as an array (entities decoded, ws collapsed).
     expect(parseRefillGrid(html)).toEqual([['A & B', '2026']]);
   });
+
+  it('decodes every entity the grid emits through the parser, once', () => {
+    const html =
+      '<table><thead><tr><th>Drug</th><th>Note</th></tr></thead>' +
+      '<tbody><tr><td>Drug&nbsp;&lt;10mg&gt;</td><td>&#39;as needed&#39; &quot;PRN&quot; &amp;amp;</td></tr></tbody></table>';
+    expect(parseRefillGrid(html)).toEqual([{ Drug: 'Drug <10mg>', Note: `'as needed' "PRN" &amp;` }]);
+  });
 });
 
 describe('insync_list_refill_requests', () => {

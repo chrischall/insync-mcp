@@ -26,7 +26,7 @@ import type { InsyncClient } from '../client.js';
 import { inputValue } from '../forms.js';
 import { isoToMdy } from './appointments.js';
 import { READ, asRecord, asRecordArray, sameId, tidy } from './_shared.js';
-import { WRITE, renderWrite, sendOnce, writeDescription } from './_writes.js';
+import { WRITE, compactResult, sendOnce, writeDescription } from './_writes.js';
 
 /**
  * "Now" as the portal's slot lookup takes it (`MM/DD/YYYY hh:mm AM`), so
@@ -191,7 +191,7 @@ export function registerSchedulingTools(server: McpServer, client: InsyncClient)
         providerId: provider_id,
         visitTypeId: visit_type_id,
       });
-      return renderWrite(
+      return compactResult(
         tidy({
           date,
           facility: facilityView(s.facility),
@@ -315,7 +315,7 @@ export function registerSchedulingTools(server: McpServer, client: InsyncClient)
           'insync_list_appointments',
         );
       },
-      render: renderWrite,
+      render: compactResult,
     }),
   );
 
@@ -394,7 +394,7 @@ export function registerSchedulingTools(server: McpServer, client: InsyncClient)
           'insync_list_appointments',
         );
       },
-      render: renderWrite,
+      render: compactResult,
     }),
   );
 }
