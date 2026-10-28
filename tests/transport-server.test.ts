@@ -286,6 +286,112 @@ describe('ServerTransport session expiry', () => {
   });
 });
 
+function bin(
+  status: number,
+  body: BodyInit,
+  opts: { contentType?: string; location?: string } = {},
+): Response {
+  const headers = new Headers();
+  if (opts.contentType !== undefined) headers.set('content-type', opts.contentType);
+  if (opts.location !== undefined) headers.set('location', opts.location);
+  return new Response(body, { status, headers });
+}
+
+describe('ServerTransport binary downloads', () => {
+  it('returns the bytes and content-type, with an empty text body', async () => {
+    const { t, mock } = makeTransport({
+      dataResponses: [bin(200, Buffer.from('PDFDATA'), { contentType: 'application/pdf' })],
+    });
+    const res = await t.getBinary('DocumentManager/DownloadFile.ashx?filePath=x');
+    expect(Buffer.from(res.bytes).toString()).toBe('PDFDATA');
+    expect(res.contentType).toBe('application/pdf');
+    expect(res.body).toBe('');
+    expect(mock.loginCalls).toBe(1);
+  });
+
+  it('POSTs a JSON body and reads bytes back (GetFile)', async () => {
+    const { t } = makeTransport({
+      dataResponses: [bin(200, Buffer.from('DOCBYTES'), { contentType: 'application/pdf' })],
+    });
+    const res = await t.postBinary('PatientDocument/GetFile', { FilePath: 'x' });
+    expect(Buffer.from(res.bytes).toString()).toBe('DOCBYTES');
+  });
+
+  it('decodes a texty prefix (no content-type) so sign-in pages are still caught', async () => {
+    const { t } = makeTransport({ dataResponses: [bin(200, Buffer.from([0, 1, 2, 3]))] });
+    const res = await t.getBinary('x');
+    expect([...res.bytes]).toEqual([0, 1, 2, 3]);
+  });
+
+  it('returns an HTML document (texty) that is not a sign-in page', async () => {
+    const { t } = makeTransport({
+      dataResponses: [bin(200, '<html>doc</html>', { contentType: 'text/html' })],
+    });
+    const res = await t.getBinary('x');
+    expect(Buffer.from(res.bytes).toString()).toBe('<html>doc</html>');
+    expect(res.body).toContain('<html>doc</html>');
+  });
+
+  it('re-logs-in and replays when the download comes back a sign-in page', async () => {
+    const { t, mock } = makeTransport({
+      dataResponses: [
+        bin(200, LOGIN_PAGE, { contentType: 'text/html' }),
+        bin(200, Buffer.from('PDF'), { contentType: 'application/pdf' }),
+      ],
+    });
+    const res = await t.getBinary('x');
+    expect(Buffer.from(res.bytes).toString()).toBe('PDF');
+    expect(mock.loginCalls).toBe(2);
+  });
+
+  it('treats a redirect to /Login as expiry and replays', async () => {
+    const { t, mock } = makeTransport({
+      dataResponses: [
+        bin(302, '', { location: '/Login' }),
+        bin(200, Buffer.from('PDF'), { contentType: 'application/pdf' }),
+      ],
+    });
+    const res = await t.getBinary('x');
+    expect(Buffer.from(res.bytes).toString()).toBe('PDF');
+    expect(mock.loginCalls).toBe(2);
+  });
+
+  it('follows a redirect that stays on the portal', async () => {
+    const { t, mock } = makeTransport({
+      dataResponses: [
+        bin(302, '', { location: '/DocumentManager/Resolved' }),
+        bin(200, Buffer.from('PDF'), { contentType: 'application/pdf' }),
+      ],
+    });
+    const res = await t.getBinary('x');
+    expect(Buffer.from(res.bytes).toString()).toBe('PDF');
+    expect(mock.loginCalls).toBe(1);
+  });
+
+  it('refuses a redirect off the portal domain', async () => {
+    const { t } = makeTransport({
+      dataResponses: [bin(302, '', { location: 'https://evil.example.com/x' })],
+    });
+    await expect(t.getBinary('x')).rejects.toThrow(/off the portal domain/);
+  });
+
+  it('refuses an absolute path outside the portal', async () => {
+    const { t } = makeTransport();
+    await expect(t.getBinary('https://evil.example.com/file.pdf')).rejects.toThrow(
+      /outside the InSync portal/,
+    );
+  });
+
+  it('refuses after too many redirects', async () => {
+    const { t } = makeTransport({
+      dataResponses: Array.from({ length: 10 }, () =>
+        bin(302, '', { location: '/DocumentManager/Loop' }),
+      ),
+    });
+    await expect(t.getBinary('x')).rejects.toThrow(/too many times/);
+  });
+});
+
 describe('parsePortal', () => {
   it('accepts a bare https insynchcs host', () => {
     expect(parsePortal('https://pfbhintouch.insynchcs.com')).toEqual({

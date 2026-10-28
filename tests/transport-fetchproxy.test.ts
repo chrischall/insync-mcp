@@ -102,4 +102,13 @@ describe('FetchproxyTransport', () => {
     const res = await t.getJson('A');
     expect(res).toEqual({ status: 200, body: '{"data":[]}', url: 'https://pfbhintouch.insynchcs.com/A' });
   });
+
+  it('refuses binary downloads — the bridge relays text only', async () => {
+    const { t } = make();
+    await expect(t.getBinary()).rejects.toThrow(/not available over the browser bridge/);
+    await expect(t.postBinary()).rejects.toThrow(/not available over the browser bridge/);
+    await expect(t.getBinary()).rejects.toMatchObject({
+      hint: expect.stringContaining('INSYNC_USERNAME'),
+    });
+  });
 });

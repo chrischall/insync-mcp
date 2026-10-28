@@ -6,9 +6,11 @@ import { registerAppointmentTools } from '../src/tools/appointments.js';
 import { registerClinicalTools } from '../src/tools/clinical.js';
 import { registerDashboardTools } from '../src/tools/dashboard.js';
 import { registerDocumentTools } from '../src/tools/documents.js';
+import { registerDownloadTools } from '../src/tools/downloads.js';
 import { registerInsyncHealthcheckTool } from '../src/tools/healthcheck.js';
 import { registerMessageTools } from '../src/tools/messages.js';
 import { registerProfileTools } from '../src/tools/profile.js';
+import { stubDownloadIO } from './_tools.js';
 
 const stubTransport: InsyncTransport = {
   start: async () => {},
@@ -20,6 +22,8 @@ const stubTransport: InsyncTransport = {
   postForm: async (): Promise<FetchResult> => ({ status: 200, body: '' }),
   getText: async (): Promise<FetchResult> => ({ status: 200, body: '' }),
   postText: async (): Promise<FetchResult> => ({ status: 200, body: '' }),
+  getBinary: async () => ({ status: 200, body: '', bytes: new Uint8Array() }),
+  postBinary: async () => ({ status: 200, body: '', bytes: new Uint8Array() }),
 };
 
 async function servedTools() {
@@ -31,6 +35,7 @@ async function servedTools() {
     registerMessageTools(server, client);
     registerDocumentTools(server, client);
     registerProfileTools(server, client);
+    registerDownloadTools(server, client, stubDownloadIO);
     registerInsyncHealthcheckTool(server, client, 'pfbhintouch.insynchcs.com', {
       bridge: undefined,
       credentialsConfigured: true,
@@ -43,7 +48,7 @@ async function servedTools() {
 
 describe('tool annotations', () => {
   it('covers the whole served surface', async () => {
-    expect(await servedTools()).toHaveLength(14);
+    expect(await servedTools()).toHaveLength(17);
   });
 
   it('marks every tool open-world', async () => {

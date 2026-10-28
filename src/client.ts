@@ -12,7 +12,7 @@
 
 import { McpToolError } from '@chrischall/mcp-utils';
 import { SecretScrubber } from './secrets.js';
-import type { FetchResult, InsyncTransport, S3Config } from './transport.js';
+import type { BinaryFetchResult, FetchResult, InsyncTransport, S3Config } from './transport.js';
 
 /**
  * Does this response mean "not signed in"? Shared with the server transport,
@@ -278,5 +278,88 @@ export class InsyncClient {
       length: String(params.length ?? 25),
     };
     return this.text(await this.transport.postForm(path, form), path);
+  }
+
+  // --- file transfer (portal endpoints only — never direct S3) ---
+
+  /**
+   * The attachment rows for a message (`GetToDoAttachments`). Listing is
+   * side-effect free — it is the portal's own attachment-tooltip endpoint, not
+   * the message-detail read that can mark a message read.
+   */
+  async listAttachments(masterId: string): Promise<unknown> {
+    const endpoint = 'Messages/GetToDoAttachments';
+    const query = new URLSearchParams({ todoMasaterId: masterId }).toString();
+    return this.json(await this.transport.getJson(`${endpoint}?${query}`), endpoint);
+  }
+
+  /**
+   * Download a message attachment's bytes from its portal `FilePath`. The path
+   * is refused unless it stays on the portal domain, so a download can never be
+   * pointed at direct storage. The caller never sees the URL — it is resolved
+   * from the attachment row here.
+   */
+  async downloadAttachment(filePath: string): Promise<BinaryFetchResult> {
+    this.assertPortalUrl(filePath);
+    return this.binary(await this.transport.getBinary(filePath), 'the attachment');
+  }
+
+  /**
+   * Resolve a document's storage folder to a concrete server file path
+   * (`GetFileSource`). Returns the portal's `{ Status, FilePath }`; the FilePath
+   * is an internal handle fed straight to {@link downloadFile}, never surfaced.
+   */
+  async getFileSource(folderUrl: string): Promise<{ status: string; filePath: string }> {
+    const endpoint = 'PatientDocument/GetFileSource';
+    const query = new URLSearchParams({ FolderUrl: folderUrl }).toString();
+    const data = this.json<Record<string, unknown>>(
+      await this.transport.postJson(`${endpoint}?${query}`, {}),
+      endpoint,
+    );
+    return {
+      status: typeof data.Status === 'string' ? data.Status : '',
+      filePath: typeof data.FilePath === 'string' ? data.FilePath : '',
+    };
+  }
+
+  /** Fetch a resolved document's bytes (`GetFile`), given a FilePath from {@link getFileSource}. */
+  async downloadFile(filePath: string): Promise<BinaryFetchResult> {
+    return this.binary(
+      await this.transport.postBinary('PatientDocument/GetFile', { FilePath: filePath }),
+      'the document',
+    );
+  }
+
+  /** Refuse an absolute download URL that leaves the InSync portal domain. */
+  private assertPortalUrl(filePath: string): void {
+    const isAbsolute = /^[a-z][a-z0-9+.-]*:\/\//i.test(filePath);
+    if (!isAbsolute) return; // relative → resolved against the portal by the transport
+    let host: string;
+    try {
+      host = new URL(filePath).hostname;
+    } catch {
+      throw this.fail('The attachment path is not a valid URL.', this.emptyHint());
+    }
+    if (!host.endsWith('.insynchcs.com')) {
+      throw this.fail(
+        'Refusing to download this attachment from a host outside the InSync portal.',
+        'InSync file downloads go only through the portal, never direct storage (S3).',
+      );
+    }
+  }
+
+  /** Validate a binary response: reject a sign-in page, an error status or empty bytes. */
+  private binary(res: BinaryFetchResult, what: string): BinaryFetchResult {
+    if (isSignedOut(res)) throw new InsyncNotSignedInError(this.mode);
+    if (res.status >= 400) {
+      throw this.fail(
+        `InSync returned ${res.status} fetching ${what}.`,
+        'The file may no longer exist, or the portal changed; see docs/INSYNC-API.md.',
+      );
+    }
+    if (res.bytes.length === 0) {
+      throw this.fail(`InSync returned no data for ${what}.`, this.emptyHint());
+    }
+    return res;
   }
 }

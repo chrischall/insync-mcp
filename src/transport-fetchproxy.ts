@@ -7,12 +7,19 @@
 // the import of @fetchproxy/server it pulls in only loads when this transport is
 // actually constructed, which index.ts does solely in fetchproxy mode.
 
+import { McpToolError } from '@chrischall/mcp-utils';
 import {
   createFetchproxyTransport,
   type BridgeProbeResult,
   type FetchproxyTransport as InnerTransport,
 } from '@chrischall/mcp-utils/fetchproxy';
-import type { FetchResult, InsyncTransport, RequestOptions, S3Config } from './transport.js';
+import type {
+  BinaryFetchResult,
+  FetchResult,
+  InsyncTransport,
+  RequestOptions,
+  S3Config,
+} from './transport.js';
 
 /**
  * The whole fetchproxy fleet shares this concentrator port — the ContextMint
@@ -104,6 +111,25 @@ export class FetchproxyTransport implements InsyncTransport {
 
   postText(path: string, body: string, opts: RequestOptions = {}): Promise<FetchResult> {
     return this.send('POST', path, body, {}, opts);
+  }
+
+  // The browser bridge relays response bodies as UTF-8 text, which would corrupt
+  // binary. File downloads therefore require the bridge-less server transport
+  // (set INSYNC_USERNAME / INSYNC_PASSWORD), not the relay.
+  getBinary(): Promise<BinaryFetchResult> {
+    return Promise.reject(this.noBinary());
+  }
+
+  postBinary(): Promise<BinaryFetchResult> {
+    return Promise.reject(this.noBinary());
+  }
+
+  private noBinary(): McpToolError {
+    return new McpToolError('File downloads are not available over the browser bridge.', {
+      hint:
+        'The bridge relays text only and would corrupt binary. Set INSYNC_USERNAME and ' +
+        'INSYNC_PASSWORD to download through the bridge-less server transport.',
+    });
   }
 
   private async send(

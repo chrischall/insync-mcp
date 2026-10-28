@@ -97,6 +97,18 @@
       "description": "The patient's prescription refill-request history (grid rows with status and dates). Does not submit a refill."
     },
     {
+      "name": "insync_list_attachments",
+      "description": "List the files attached to a secure message by its master id. Returns each attachment's name and position; use insync_download_attachment to retrieve one. Listing does not open or mark the message read."
+    },
+    {
+      "name": "insync_download_attachment",
+      "description": "Download one file attached to a secure message, by the message's master id and the attachment's position from insync_list_attachments. Saves to disk locally or returns bytes inline when hosted; goes through the portal, never direct storage."
+    },
+    {
+      "name": "insync_download_document",
+      "description": "Download a document filed to the patient's portal account, by the folder_url and file_name from insync_list_documents. Saves to disk locally or returns bytes inline when hosted; goes through the portal, never direct storage."
+    },
+    {
       "name": "insync_healthcheck",
       "description": "Report portal connectivity from whichever transport is live: the server-side credential sign-in, or the browser bridge. Skipped when no credential resolves."
     }

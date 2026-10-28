@@ -2,16 +2,24 @@
 // a `capture` that registers a tool module on a stub server and hands back the
 // tool handlers plus the transport (to assert which calls were made).
 import { InsyncClient } from '../src/client.js';
-import type { FetchResult, InsyncTransport, RequestOptions, S3Config } from '../src/transport.js';
+import type {
+  BinaryFetchResult,
+  FetchResult,
+  InsyncTransport,
+  RequestOptions,
+  S3Config,
+} from '../src/transport.js';
+import type { DownloadIO } from '../src/download-io.js';
 import { registerAppointmentTools } from '../src/tools/appointments.js';
 import { registerClinicalTools } from '../src/tools/clinical.js';
 import { registerDashboardTools } from '../src/tools/dashboard.js';
 import { registerDocumentTools } from '../src/tools/documents.js';
+import { registerDownloadTools } from '../src/tools/downloads.js';
 import { registerMessageTools } from '../src/tools/messages.js';
 import { registerProfileTools } from '../src/tools/profile.js';
 
 export interface FakeCall {
-  verb: 'getJson' | 'postJson' | 'postForm' | 'getText' | 'postText';
+  verb: 'getJson' | 'postJson' | 'postForm' | 'getText' | 'postText' | 'getBinary' | 'postBinary';
   path: string;
   body?: unknown;
   opts?: RequestOptions;
@@ -19,7 +27,10 @@ export interface FakeCall {
 
 export class FakeTransport implements InsyncTransport {
   calls: FakeCall[] = [];
-  constructor(private readonly responder: (call: FakeCall) => FetchResult) {}
+  constructor(
+    private readonly responder: (call: FakeCall) => FetchResult,
+    private readonly binaryResponder?: (call: FakeCall) => BinaryFetchResult,
+  ) {}
   async start(): Promise<void> {}
   async close(): Promise<void> {}
   status(): unknown {
@@ -31,6 +42,11 @@ export class FakeTransport implements InsyncTransport {
   private rec(call: FakeCall): Promise<FetchResult> {
     this.calls.push(call);
     return Promise.resolve(this.responder(call));
+  }
+  private recBinary(call: FakeCall): Promise<BinaryFetchResult> {
+    this.calls.push(call);
+    if (this.binaryResponder === undefined) throw new Error('no binaryResponder');
+    return Promise.resolve(this.binaryResponder(call));
   }
   getJson(path: string, opts?: RequestOptions) {
     return this.rec({ verb: 'getJson', path, opts });
@@ -46,6 +62,12 @@ export class FakeTransport implements InsyncTransport {
   }
   postText(path: string, body: string, opts?: RequestOptions) {
     return this.rec({ verb: 'postText', path, body, opts });
+  }
+  getBinary(path: string, opts?: RequestOptions) {
+    return this.recBinary({ verb: 'getBinary', path, opts });
+  }
+  postBinary(path: string, body: unknown, opts?: RequestOptions) {
+    return this.recBinary({ verb: 'postBinary', path, body, opts });
   }
 }
 
@@ -91,9 +113,17 @@ export const stubTransport: InsyncTransport = {
   postForm: async () => ({ status: 200, body: '' }),
   getText: async () => ({ status: 200, body: '' }),
   postText: async () => ({ status: 200, body: '' }),
+  getBinary: async () => ({ status: 200, body: '', bytes: new Uint8Array() }),
+  postBinary: async () => ({ status: 200, body: '', bytes: new Uint8Array() }),
 };
 
-/** The names the six read modules register (healthcheck needs the concrete deps). */
+/** A disk-persisting DownloadIO stub for registration-only tests. */
+export const stubDownloadIO: DownloadIO = {
+  persistsFiles: true,
+  deliver: (args) => ({ fileName: args.fileName, mimeType: args.mimeType, size: args.bytes.length }),
+};
+
+/** The names every read/download module registers (healthcheck needs the concrete deps). */
 export function readToolRoster(): string[] {
   const names: string[] = [];
   const server = { registerTool: (name: string) => names.push(name) } as unknown as Parameters<
@@ -106,5 +136,6 @@ export function readToolRoster(): string[] {
   registerMessageTools(server, client);
   registerDocumentTools(server, client);
   registerProfileTools(server, client);
+  registerDownloadTools(server, client, stubDownloadIO);
   return names;
 }

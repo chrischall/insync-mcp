@@ -14,11 +14,13 @@
 
 import { loadDotenvSafely, readEnvVar, readPortEnv, runMcp } from '@chrischall/mcp-utils';
 import { InsyncClient, type TransportMode } from './client.js';
+import { makeDownloadIO } from './download-io.js';
 import { SecretScrubber } from './secrets.js';
 import { registerAppointmentTools } from './tools/appointments.js';
 import { registerClinicalTools } from './tools/clinical.js';
 import { registerDashboardTools } from './tools/dashboard.js';
 import { registerDocumentTools } from './tools/documents.js';
+import { registerDownloadTools } from './tools/downloads.js';
 import { registerInsyncHealthcheckTool } from './tools/healthcheck.js';
 import { registerMessageTools } from './tools/messages.js';
 import { registerProfileTools } from './tools/profile.js';
@@ -61,6 +63,7 @@ if (mode === 'server') {
 }
 
 const client = new InsyncClient({ transport, scrubber, mode });
+const downloadIO = makeDownloadIO();
 
 await runMcp({
   name: 'insync-mcp',
@@ -80,6 +83,7 @@ await runMcp({
     (server) => registerMessageTools(server, client),
     (server) => registerDocumentTools(server, client),
     (server) => registerProfileTools(server, client),
+    (server) => registerDownloadTools(server, client, downloadIO),
     (server) => registerInsyncHealthcheckTool(server, client, host, { bridge, credentialsConfigured }),
   ],
 });

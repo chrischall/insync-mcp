@@ -1,10 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { InsyncClient, isSignedOut, type TransportMode } from '../src/client.js';
 import { SecretScrubber } from '../src/secrets.js';
-import type { FetchResult, InsyncTransport, RequestOptions, S3Config } from '../src/transport.js';
+import type {
+  BinaryFetchResult,
+  FetchResult,
+  InsyncTransport,
+  RequestOptions,
+  S3Config,
+} from '../src/transport.js';
 
 interface Call {
-  verb: 'getJson' | 'postJson' | 'postForm' | 'getText' | 'postText';
+  verb: 'getJson' | 'postJson' | 'postForm' | 'getText' | 'postText' | 'getBinary' | 'postBinary';
   path: string;
   body?: unknown;
   opts?: RequestOptions;
@@ -13,6 +19,7 @@ interface Call {
 class FakeTransport implements InsyncTransport {
   calls: Call[] = [];
   s3: S3Config | undefined;
+  binary: BinaryFetchResult = { status: 200, body: '', bytes: new Uint8Array() };
   constructor(private readonly responder: (call: Call) => FetchResult) {}
   async start(): Promise<void> {}
   async close(): Promise<void> {}
@@ -44,6 +51,14 @@ class FakeTransport implements InsyncTransport {
   }
   postText(path: string, body: string, opts?: RequestOptions): Promise<FetchResult> {
     return Promise.resolve(this.record({ verb: 'postText', path, body, opts }));
+  }
+  getBinary(path: string, opts?: RequestOptions): Promise<BinaryFetchResult> {
+    this.calls.push({ verb: 'getBinary', path, opts });
+    return Promise.resolve(this.binary);
+  }
+  postBinary(path: string, body: unknown, opts?: RequestOptions): Promise<BinaryFetchResult> {
+    this.calls.push({ verb: 'postBinary', path, body, opts });
+    return Promise.resolve(this.binary);
   }
 }
 
@@ -236,5 +251,72 @@ describe('InsyncClient signed-out and malformed responses', () => {
     const { c } = client(() => ok('<html><title>S3SUPERSECRET123</title></html>'), { scrubber });
     await expect(c.getCounts()).rejects.toThrow(/\[REDACTED\]/);
     await expect(c.getCounts()).rejects.not.toThrow(/S3SUPERSECRET123/);
+  });
+});
+
+describe('InsyncClient file transfer', () => {
+  const bytes = (s: string): Uint8Array => new Uint8Array(Buffer.from(s));
+
+  it('lists attachments through the side-effect-free endpoint', async () => {
+    const { c, t } = client(() => ok('[]'));
+    await c.listAttachments('42');
+    expect(t.calls[0]).toMatchObject({
+      verb: 'getJson',
+      path: 'Messages/GetToDoAttachments?todoMasaterId=42',
+    });
+  });
+
+  it('downloads an attachment on a relative portal path', async () => {
+    const { c, t } = client(() => ok('{}'));
+    t.binary = { status: 200, body: '', bytes: bytes('PDF'), contentType: 'application/pdf' };
+    const res = await c.downloadAttachment('/DocumentManager/DownloadFile.ashx?f=1');
+    expect(Buffer.from(res.bytes).toString()).toBe('PDF');
+    expect(t.calls[0]?.verb).toBe('getBinary');
+  });
+
+  it('refuses an off-portal host', async () => {
+    const { c } = client(() => ok('{}'));
+    await expect(c.downloadAttachment('https://evil.example.com/x')).rejects.toThrow(
+      /outside the InSync portal/,
+    );
+  });
+
+  it('refuses an unparseable absolute attachment path', async () => {
+    const { c } = client(() => ok('{}'));
+    await expect(c.downloadAttachment('http://')).rejects.toThrow(/not a valid URL/);
+  });
+
+  it('rejects a signed-out binary response', async () => {
+    const { c, t } = client(() => ok('{}'));
+    t.binary = { status: 200, body: LOGIN, bytes: bytes(LOGIN) };
+    await expect(c.downloadAttachment('/x')).rejects.toThrow(/Not signed in/);
+  });
+
+  it('rejects an error status and an empty binary body', async () => {
+    const err = client(() => ok('{}'));
+    err.t.binary = { status: 404, body: '', bytes: new Uint8Array() };
+    await expect(err.c.downloadAttachment('/x')).rejects.toThrow(/returned 404/);
+    const empty = client(() => ok('{}'));
+    empty.t.binary = { status: 200, body: '', bytes: new Uint8Array() };
+    await expect(empty.c.downloadAttachment('/x')).rejects.toThrow(/no data/);
+  });
+
+  it('resolves a file source and reads non-string fields as absent', async () => {
+    const good = client(() => ok(JSON.stringify({ Status: 'Success', FilePath: '/srv/f' })));
+    expect(await good.c.getFileSource('folder/x')).toEqual({ status: 'Success', filePath: '/srv/f' });
+    expect(good.t.calls[0]).toMatchObject({
+      verb: 'postJson',
+      path: 'PatientDocument/GetFileSource?FolderUrl=folder%2Fx',
+    });
+    const odd = client(() => ok(JSON.stringify({ Status: 1, FilePath: null })));
+    expect(await odd.c.getFileSource('x')).toEqual({ status: '', filePath: '' });
+  });
+
+  it('downloads a document file via GetFile', async () => {
+    const { c, t } = client(() => ok('{}'));
+    t.binary = { status: 200, body: '', bytes: bytes('DOC'), contentType: 'application/pdf' };
+    const res = await c.downloadFile('/srv/doc');
+    expect(Buffer.from(res.bytes).toString()).toBe('DOC');
+    expect(t.calls[0]).toMatchObject({ verb: 'postBinary', path: 'PatientDocument/GetFile', body: { FilePath: '/srv/doc' } });
   });
 });

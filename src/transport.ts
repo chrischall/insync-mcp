@@ -17,6 +17,19 @@ export interface FetchResult {
   url?: string;
 }
 
+/**
+ * A binary request's result. Extends {@link FetchResult} so the session manager
+ * and {@link isSignedOut} can judge it exactly as they judge a text result:
+ * `body` holds a short decoded prefix ONLY when the response looks like text (a
+ * sign-in page, a JSON timeout, a redirect), and is empty for real binary. The
+ * bytes ride alongside on `bytes`.
+ */
+export interface BinaryFetchResult extends FetchResult {
+  bytes: Uint8Array;
+  /** The upstream `Content-Type`, used to pick a file extension. */
+  contentType?: string;
+}
+
 /** Per-call options shared by every verb. */
 export interface RequestOptions {
   /** Extra request headers, merged over the verb's defaults. */
@@ -61,6 +74,15 @@ export interface InsyncTransport {
   ): Promise<FetchResult>;
   getText(path: string, opts?: RequestOptions): Promise<FetchResult>;
   postText(path: string, body: string, opts?: RequestOptions): Promise<FetchResult>;
+  /**
+   * GET a binary payload (a downloaded file's bytes). Follows redirects only
+   * within the portal domain; a redirect off `*.insynchcs.com` is refused so a
+   * download can never be bounced to direct storage (S3). Not available on the
+   * browser-bridge transport, which relays text only.
+   */
+  getBinary(path: string, opts?: RequestOptions): Promise<BinaryFetchResult>;
+  /** POST a JSON body and read a binary payload back (the document `GetFile` endpoint). */
+  postBinary(path: string, body: unknown, opts?: RequestOptions): Promise<BinaryFetchResult>;
   /** The captured S3 config, or `undefined` (never captured on the bridge path). */
   getS3Config(): S3Config | undefined;
 }

@@ -24,6 +24,7 @@ import {
   NotAcceptedError,
   parsePortal,
   PermanentTransportError,
+  type BinaryFetchResult,
   type FetchResult,
   type InsyncTransport,
   type PortalInfo,
@@ -159,6 +160,77 @@ export class ServerTransport implements InsyncTransport {
 
   postText(path: string, body: string, opts: RequestOptions = {}): Promise<FetchResult> {
     return this.request({ method: 'POST', path, headers: { ...opts.headers }, body, replay: opts.replay });
+  }
+
+  getBinary(path: string, opts: RequestOptions = {}): Promise<BinaryFetchResult> {
+    return this.binaryRequest({ method: 'GET', path, headers: { ...opts.headers } });
+  }
+
+  postBinary(path: string, body: unknown, opts: RequestOptions = {}): Promise<BinaryFetchResult> {
+    return this.binaryRequest({
+      method: 'POST',
+      path,
+      headers: { 'Content-Type': 'application/json', ...opts.headers },
+      body: JSON.stringify(body),
+    });
+  }
+
+  // Binary fetches are idempotent reads, so they always go through the session's
+  // replay-once path: a lapsed session re-logs-in and the download is retried.
+  private async binaryRequest(spec: RequestSpec): Promise<BinaryFetchResult> {
+    return (await this.sessions.withSession((session) =>
+      this.doBinaryRequest(session.jar, spec),
+    )) as BinaryFetchResult;
+  }
+
+  private async doBinaryRequest(
+    jar: Map<string, string>,
+    spec: RequestSpec,
+  ): Promise<BinaryFetchResult> {
+    let url = new URL(spec.path, `${this.portal().origin}/`);
+    if (!url.hostname.endsWith('.insynchcs.com')) {
+      throw new McpToolError('Refusing to download from a host outside the InSync portal.', {
+        hint: 'InSync file downloads go only through the portal, never direct storage (S3).',
+      });
+    }
+    for (let hop = 0; hop < 10; hop++) {
+      const res = await this.doFetch(url.toString(), {
+        method: hop === 0 ? spec.method : 'GET',
+        redirect: 'manual',
+        headers: {
+          Cookie: cookieHeader(jar),
+          'X-Requested-With': 'XMLHttpRequest',
+          'User-Agent': USER_AGENT,
+          ...spec.headers,
+        },
+        body: hop === 0 ? spec.body : undefined,
+      });
+      absorb(res.headers, jar);
+      const location = res.headers.get('location');
+      const contentType = res.headers.get('content-type') ?? undefined;
+      if (res.status >= 300 && res.status < 400 && location !== null) {
+        const next = new URL(location, url);
+        // A redirect to the sign-in page means the session lapsed; surface it so
+        // withSession re-logs-in and replays the whole download.
+        if (/\/Login/i.test(next.pathname)) {
+          return { status: res.status, body: '', bytes: new Uint8Array(), url: location, contentType };
+        }
+        if (!next.hostname.endsWith('.insynchcs.com')) {
+          throw new McpToolError('InSync redirected the download off the portal domain.', {
+            hint: 'File downloads go only through the portal, never direct storage (S3).',
+          });
+        }
+        url = next;
+        continue;
+      }
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      // Decode a short prefix only for a texty response, so isSignedOut can spot a
+      // sign-in or timeout page served with 200; real binary leaves body empty.
+      const texty = contentType === undefined || /text\/|json|xml/i.test(contentType);
+      const body = texty ? Buffer.from(bytes.subarray(0, 4096)).toString('utf8') : '';
+      return { status: res.status, body, bytes, url: location ?? undefined, contentType };
+    }
+    throw new McpToolError('InSync redirected the download too many times.', { hint: API_HINT });
   }
 
   private async request(spec: RequestSpec): Promise<FetchResult> {
