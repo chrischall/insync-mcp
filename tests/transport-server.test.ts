@@ -306,6 +306,21 @@ describe('ServerTransport transient failures (retried)', () => {
     expect(mock.cookiesSeen.filter((c) => c.includes('.ASPXAUTH'))).toHaveLength(1);
   });
 
+  it("refuses a login handoff URL that starts on another practice's portal", async () => {
+    // The login JSON's `url` is the FIRST hop, fetched with the fresh session
+    // cookies attached — it must be origin-checked before that request, not
+    // only on the redirects that follow it.
+    const { t, mock } = makeTransport({
+      login: () =>
+        resp(200, LOGIN_OK.replace('"/Login/RedirectWithoutMessage"', `"${OTHER_PRACTICE}/Login/RedirectWithoutMessage"`), {
+          setCookies: SESSION_COOKIES,
+        }),
+    });
+    await expect(t.getJson('A')).rejects.toThrow(/off the portal domain/);
+    // The session cookie was minted but never sent anywhere.
+    expect(mock.cookiesSeen.filter((c) => c.includes('.ASPXAUTH'))).toHaveLength(0);
+  });
+
   it('fails when the handoff loops too many times', async () => {
     const { t } = makeTransport({ handoff: () => resp(302, '', { location: '/Login/RedirectWithoutMessage' }) });
     await expect(t.getJson('A')).rejects.toThrow(/too many times/);

@@ -442,23 +442,24 @@ export class ServerTransport implements InsyncTransport {
     }
   }
 
+  // Every hop — the login JSON's own `url` included, which is the first request
+  // to carry the fresh session cookies — is origin-checked BEFORE it is fetched.
   private async followHandoff(jar: Map<string, string>, startUrl: string): Promise<void> {
-    let current = new URL(startUrl, `${this.portal().origin}/`).toString();
+    let current = new URL(startUrl, `${this.portal().origin}/`);
     for (let hop = 0; hop < 10; hop++) {
-      const res = await this.doRequest(jar, {
-        method: 'GET',
-        path: current,
-        headers: { Accept: 'text/html' },
-      });
-      if (res.status < 300 || res.status >= 400) return;
-      if (res.url === undefined) return;
-      const next = new URL(res.url, current);
-      if (!this.onPortal(next)) {
+      if (!this.onPortal(current)) {
         throw new McpToolError('InSync sign-in redirected off the portal domain.', {
           hint: API_HINT,
         });
       }
-      current = next.toString();
+      const res = await this.doRequest(jar, {
+        method: 'GET',
+        path: current.toString(),
+        headers: { Accept: 'text/html' },
+      });
+      if (res.status < 300 || res.status >= 400) return;
+      if (res.url === undefined) return;
+      current = new URL(res.url, current);
     }
     throw new McpToolError('InSync sign-in redirected too many times.', { hint: API_HINT });
   }
