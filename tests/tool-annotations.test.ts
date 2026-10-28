@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { CONFIRM_FLOW_SENTENCE, CONFIRM_INJECTION_RULE } from '@chrischall/mcp-utils';
 import { createTestHarness } from '@chrischall/mcp-utils/test';
 import { InsyncClient } from '../src/client.js';
 import type { FetchResult, InsyncTransport } from '../src/transport.js';
@@ -79,10 +80,10 @@ describe('tool annotations', () => {
 
   it('marks every read tool read-only and never read-and-destructive', async () => {
     const tools = await servedTools();
-    // The two writes: insync_get_message (opening an unread message marks it
-    // read, which the practice sees and cannot be undone) and
-    // insync_upload_insurance_card (confirm-gated upload to the profile). Both
-    // are destructive; everything else is a read.
+    // The writes: insync_get_message (opening an unread message marks it read,
+    // which the practice sees and cannot be undone) and the six confirm-gated
+    // writes (sends, requests, cancellation, insurance-card upload). All are
+    // destructive; everything else is a read.
     const writes = tools
       .filter((t) => t.annotations?.readOnlyHint !== true)
       .map((t) => [t.name, t.annotations?.destructiveHint])
@@ -101,5 +102,22 @@ describe('tool annotations', () => {
       .filter((t) => t.annotations?.readOnlyHint === true && t.annotations?.destructiveHint === true)
       .map((t) => t.name);
     expect(contradictory).toEqual([]);
+  });
+
+  it('states the confirm flow exactly once, plus the injection rule, on every gated write', async () => {
+    // registerWrite appends the confirm-flow sentence itself; a tool that also
+    // added it by hand would say it twice.
+    const gated = (await servedTools()).filter(
+      (t) => t.annotations?.readOnlyHint !== true && t.name !== 'insync_get_message',
+    );
+    expect(gated.map((t) => t.name)).toContain('insync_upload_insurance_card');
+    const bad = gated
+      .filter(
+        (t) =>
+          (t.description ?? '').split(CONFIRM_FLOW_SENTENCE).length !== 2 ||
+          !(t.description ?? '').includes(CONFIRM_INJECTION_RULE),
+      )
+      .map((t) => t.name);
+    expect(bad).toEqual([]);
   });
 });
