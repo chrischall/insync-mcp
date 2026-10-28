@@ -10,7 +10,7 @@ const PORTAL_FILE = 'https://pfbhintouch.insynchcs.com/DocumentManager/DownloadF
 
 // Fake S3 values that must never surface from a download result (the creds the
 // login carries are held server-side and the file tools never touch them).
-const S3_SENTINELS = ['AKIATESTKEY12345', 'SECRETKEY67890ABCDEF', 'stdbktfh'];
+const S3_SENTINELS = ['AKIATESTKEY12345', 'SECRETKEY67890ABCDEF', 'test-bucket-synthetic'];
 
 const okJson = (value: unknown): FetchResult => ({ status: 200, body: JSON.stringify(value) });
 const okBin = (body: string, contentType?: string): BinaryFetchResult => ({

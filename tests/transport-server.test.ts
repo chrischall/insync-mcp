@@ -22,7 +22,7 @@ const LOGIN_OK = JSON.stringify({
   ePrescriptionToken: 'EPRESCRIPTIONSECRET',
   S3AccessKeyID: 'AKIATESTKEY12345',
   S3SecretAccessKey: 'SECRETKEY67890ABCDEF',
-  S3BucketName: 'stdbktfh',
+  S3BucketName: 'test-bucket-synthetic',
   S3RegionEndpoint: 's3.us-east-1.amazonaws.com',
   S3PracticeFolderName: 'practice-folder-1234',
   IsAWSS3Enabled: true,
@@ -110,18 +110,18 @@ describe('ServerTransport login (happy path)', () => {
     // the data call carried the session cookie
     expect(mock.cookiesSeen.some((c) => c.includes('.ASPXAUTH=aspxauth-value'))).toBe(true);
     const s3 = t.getS3Config();
-    expect(s3).toMatchObject({ enabled: true, accessKeyId: 'AKIATESTKEY12345', bucketName: 'stdbktfh' });
+    expect(s3).toMatchObject({ enabled: true, accessKeyId: 'AKIATESTKEY12345', bucketName: 'test-bucket-synthetic' });
     expect(t.status()).toMatchObject({ mode: 'server', signedIn: true });
   });
 
   it('registers the S3 values and the password with the scrubber', async () => {
     const { t, scrubber } = makeTransport();
     await t.getJson('Dashboard/GetDashBoradCount');
-    for (const v of ['AKIATESTKEY12345', 'SECRETKEY67890ABCDEF', 'stdbktfh', 's3.us-east-1.amazonaws.com', 'practice-folder-1234', 'pw-secret']) {
+    for (const v of ['AKIATESTKEY12345', 'SECRETKEY67890ABCDEF', 'test-bucket-synthetic', 's3.us-east-1.amazonaws.com', 'practice-folder-1234', 'pw-secret']) {
       expect(scrubber.has(v)).toBe(true);
     }
     // none of the whitelist-excluded secrets leak into a scrubbed string
-    expect(scrubber.scrub('AKIATESTKEY12345 SECRETKEY67890ABCDEF stdbktfh')).not.toContain('stdbktfh');
+    expect(scrubber.scrub('AKIATESTKEY12345 SECRETKEY67890ABCDEF test-bucket-synthetic')).not.toContain('test-bucket-synthetic');
   });
 
   it('shares one login across a burst of calls', async () => {
