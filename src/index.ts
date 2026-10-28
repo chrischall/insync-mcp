@@ -8,9 +8,11 @@
 //   * otherwise        → the fetchproxy bridge, relaying through the user's
 //     signed-in portal tab. Holds no credentials at all.
 //
-// NOT read-only: it reads, downloads portal files, and uploads an insurance
-// card (confirm-gated), and opening an unread message can mark it read. The S3
-// creds the login carries are held server-side and never emitted.
+// NOT read-only: alongside the reads and portal-file downloads it sends secure
+// messages, refill requests, appointment requests and cancellation requests,
+// and uploads an insurance card (all confirm-gated); opening an unread message
+// can also mark it read. The S3 creds the login carries are held server-side
+// and never emitted.
 
 import { loadDotenvSafely, readEnvVar, readPortEnv, requireEnvVar, runMcp } from '@chrischall/mcp-utils';
 import { InsyncClient, type TransportMode } from './client.js';
