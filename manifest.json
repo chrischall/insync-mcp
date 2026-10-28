@@ -38,6 +38,8 @@
         "INSYNC_PASSWORD": "${user_config.insync_password}",
         "INSYNC_TRANSPORT": "${user_config.insync_transport}",
         "INSYNC_WS_PORT": "${user_config.insync_ws_port}",
+        "INSYNC_OUTPUT_DIR": "${user_config.insync_output_dir}",
+        "INSYNC_INLINE_DOWNLOADS": "${user_config.insync_inline_downloads}",
         "FETCHPROXY_WS_HOST": "${user_config.fetchproxy_ws_host}",
         "FETCHPROXY_IDENTITY_DIR": "${user_config.fetchproxy_identity_dir}"
       }
@@ -147,6 +149,18 @@
       "type": "string",
       "title": "fetchproxy port (advanced)",
       "description": "fetchproxy concentrator port (fetchproxy transport only, default 37149). The whole fleet shares this one port; override only when hosting.",
+      "required": false
+    },
+    "insync_output_dir": {
+      "type": "string",
+      "title": "Download directory (advanced)",
+      "description": "Where downloaded files are written (a path-delimiter list; ~ expands). Default ~/Downloads and ~/Documents. A per-call dest must resolve inside one of these.",
+      "required": false
+    },
+    "insync_inline_downloads": {
+      "type": "string",
+      "title": "Inline downloads (advanced)",
+      "description": "true returns downloaded bytes inline (base64) instead of writing to disk, for a hosted runner whose disk you cannot reach. Default false.",
       "required": false
     },
     "fetchproxy_ws_host": {

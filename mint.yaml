@@ -1,0 +1,130 @@
+version: 1
+name: InSync Patient Portal
+slug: insync
+summary: >-
+  Read your InSync (Qualifacts) behavioral-health portal: appointments,
+  medications, allergies, messages, forms, surveys, balance. Plus file
+  downloads and a confirm-gated insurance-card upload.
+
+# Sample prompts for the public catalog.
+examples:
+  - prompt: Do I have any upcoming therapy or psychiatry appointments?
+    note: Lists upcoming visits with date, time, provider and facility.
+  - prompt: What medications am I currently on, and who prescribed each one?
+    note: Lists current prescriptions with dispense, refills and prescriber.
+  - prompt: Are there any unread messages from my practice, and any forms to fill out?
+    note: Lists messages (listing never marks one read) and pending forms.
+
+# This server has TWO transports and the hosted one is the bridge-less path:
+# with INSYNC_USERNAME/INSYNC_PASSWORD set it signs in server-side with its own
+# cookie jar, so no browser, extension or bridge is involved and this registers
+# like any other credential MCP. The password login is live-verified (no MFA
+# observed on the owner's practice); a rejected sign-in is never retried, since
+# the portal counts failures toward a lockout.
+#
+# Without those credentials it falls back to the fetchproxy browser bridge, which
+# relays through the user's signed-in tab. Hosting THAT would additionally need
+# `bridge: true` + `bridgePortEnv: INSYNC_WS_PORT` on the registration — set over
+# the control API, since this manifest has no column for them. Prefer the
+# credential path.
+#
+# NOT read-only: besides reads it downloads portal files and uploads an insurance
+# card (confirm-gated, destructive), and opening an UNREAD message can mark it
+# read (visible to the practice, no inverse — insync_get_message gates that
+# behind allow_mark_read). The practice-wide AWS S3 credentials the login carries
+# are held server-side and are scrubbed from every result, error and log; file
+# transfer goes only through the portal's own session-authorized endpoints,
+# never direct object storage.
+
+env:
+  # INSYNC_USERNAME / INSYNC_PASSWORD are deliberately NOT here: they are
+  # collected from each connector user at connect time (see `auth.fields`
+  # below), and an auth field may not name a host-set variable. Set them in .env
+  # only for a local, single-user install.
+  - name: INSYNC_PORTAL
+    required: true
+    help: >-
+      Your practice's portal, scheme and host only, e.g.
+      https://pfbhintouch.insynchcs.com — no path, no query. The portal is
+      per-practice, so a wrong host reads a different practice. Required.
+  - name: INSYNC_TRANSPORT
+    required: false
+    help: >-
+      server or fetchproxy. Default: server when the username and password are
+      both set, otherwise fetchproxy (relays through your signed-in portal tab).
+  - name: INSYNC_WS_PORT
+    required: false
+    help: >-
+      fetchproxy WebSocket concentrator port (default 37149). Only meaningful for
+      the browser-bridge fallback; ignored on the credential path. A bridged
+      registration also needs `bridge: true` + `bridgePortEnv: INSYNC_WS_PORT`.
+  - name: INSYNC_OUTPUT_DIR
+    required: false
+    help: >-
+      Where downloaded files are written (a path-delimiter list; ~ expands).
+      Default ~/Downloads and ~/Documents. A per-call dest must resolve inside
+      one of these. Ignored when INSYNC_INLINE_DOWNLOADS is set.
+  - name: INSYNC_INLINE_DOWNLOADS
+    required: false
+    help: >-
+      true returns downloaded bytes inline (base64) instead of writing to disk —
+      the right choice on a hosted runner whose disk the user cannot reach.
+      Default false (disk).
+  - name: MCP_CONFIRM_MODE
+    required: false
+    help: >-
+      Confirm-gate behaviour for the insurance-card upload. ask-user (default)
+      returns a preview + confirmToken and requires a second call with that
+      token; auto lets a capable host confirm in one step; an unrecognised value
+      fails closed (refuse).
+  - name: MCP_CONFIRM_ELICITATION
+    required: false
+    help: >-
+      on (default) lets the host confirm the upload interactively (elicitation);
+      off forces the confirmToken round-trip.
+
+identity:
+  # One child per caller. Required for `auth` below, and right on its own merits:
+  # these are personal health records, so two people sharing one child would
+  # share one signed-in session.
+  perUserChild: true
+
+auth:
+  # Collected once, on the connector's authorize page, before any tool runs.
+  # There is no `flow`: the password login needs no challenge step (no MFA
+  # observed), and no `capture` either — the credential child signs in on first
+  # use and holds its cookie jar in memory for the life of the process.
+  fields:
+    - name: INSYNC_USERNAME
+      label: Portal username
+      type: text
+      required: true
+      help: >-
+        The username you sign in with at your InSync portal. Not your email,
+        unless that is your username.
+    - name: INSYNC_PASSWORD
+      label: Portal password
+      type: password
+      required: true
+      help: >-
+        Your InSync portal password. It is stored as a per-user secret and is
+        never shown again. The portal counts failed sign-ins toward a lockout,
+        so nothing here retries for you.
+
+state:
+  dataDir: true
+  reason: >-
+    Only the fetchproxy BRIDGE fallback needs it: @fetchproxy/server stores its
+    long-term identity keypair under the data directory (default
+    $HOME/.fetchproxy, overridable with FETCHPROXY_IDENTITY_DIR). Without
+    persistence the bridge re-mints that identity on every cold start, so the
+    pairing with the user's browser extension is lost and they must approve a new
+    pair code each time — on a scale-to-zero machine, repeatedly. The default
+    credential path holds its session cookie jar in memory and writes nothing, so
+    it does not depend on this.
+
+# No `egress` block: the host is per-practice (INSYNC_PORTAL, an
+# *.insynchcs.com subdomain chosen by the connector user), so there is no single
+# fixed domain to allow-list here. On the credential path the server fetches
+# paths under that host directly; on the bridge fallback the same host is reached
+# through the user's tab. No other host appears as a fetch base.

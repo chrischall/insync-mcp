@@ -12,7 +12,7 @@
 // card (confirm-gated), and opening an unread message can mark it read. The S3
 // creds the login carries are held server-side and never emitted.
 
-import { loadDotenvSafely, readEnvVar, readPortEnv, runMcp } from '@chrischall/mcp-utils';
+import { loadDotenvSafely, readEnvVar, readPortEnv, requireEnvVar, runMcp } from '@chrischall/mcp-utils';
 import { InsyncClient, type TransportMode } from './client.js';
 import { makeDownloadIO } from './download-io.js';
 import { SecretScrubber } from './secrets.js';
@@ -32,7 +32,12 @@ import { VERSION } from './version.js';
 
 await loadDotenvSafely({});
 
-const portalRaw = readEnvVar('INSYNC_PORTAL');
+// INSYNC_PORTAL is mandatory — the portal is per-practice, so without it there
+// is no host to talk to. requireEnvVar throws a value-free error at boot rather
+// than letting parsePortal fail later.
+const portalRaw = requireEnvVar('INSYNC_PORTAL', {
+  hint: 'Set INSYNC_PORTAL to your practice portal, e.g. https://pfbhintouch.insynchcs.com (scheme + host only, no path).',
+});
 const username = readEnvVar('INSYNC_USERNAME');
 // The password may legitimately contain leading/trailing whitespace.
 const password = readEnvVar('INSYNC_PASSWORD', { trim: false });
