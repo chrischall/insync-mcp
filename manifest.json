@@ -3,7 +3,7 @@
   "manifest_version": "0.3",
   "name": "insync-mcp",
   "display_name": "InSync Patient Portal",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Use an InSync Healthcare (Qualifacts) patient portal — appointments, medications, allergies, messages, forms and balance, plus confirm-gated messages, refill, appointment and cancellation requests — by signing in server-side with your portal password, or by relaying through your signed-in browser tab.",
   "author": {
     "name": "Chris Chall",

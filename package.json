@@ -1,6 +1,6 @@
 {
   "name": "@chrischall/insync-mcp",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "MCP server for InSync Healthcare (Qualifacts) patient portals: appointments, medications, allergies, messages, forms and balance, plus confirm-gated messages and refill, appointment and cancellation requests.",
   "type": "module",
   "bin": {
