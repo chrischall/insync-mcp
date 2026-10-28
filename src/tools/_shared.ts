@@ -56,47 +56,25 @@ export function cleanCellText(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
 }
 
-/** The name segments that mark a key as a URL, path, token or secret. */
-const URLISH_SEGMENTS = new Set([
-  'path',
-  'url',
-  'uri',
-  'src',
-  'source',
-  'link',
-  'href',
-  'token',
-  'secret',
-  'key',
-  'sas',
-  'signature',
-]);
-
-/**
- * A key name split into its lower-cased words: on `_`/`-`/space, on a
- * lower-or-digit → upper boundary (`FilePath` → file, path), and at the end of
- * an acronym (`AccessKeyID` → access, key, id; `S3URL` → s3, url).
- */
-function keySegments(key: string): string[] {
-  return key
-    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
-    .toLowerCase()
-    .split(/[\s_-]+/);
-}
+/** The words that mark a key name as a URL, path, token or secret. */
+const URLISH = /path|url|uri|src|source|link|href|token|secret|key|sas|signature/i;
 
 /**
  * Drop any key whose NAME looks like a URL, path, token or secret. Used on
  * message-attachment metadata so a session-authorized fetch URL never lands in
  * the transcript — the attachment bytes are the download tools' job, not a
- * read's. A key matches only when one of its WORDS is a URL/secret token, so
- * `DownloadUrl` and `AccessKeyID` go but `Monkey` (which merely contains the
- * letters "key") stays.
+ * read's.
+ *
+ * Deliberately a SUBSTRING match, not a word match. Splitting a name into
+ * words reads `DownloadUrl` and `AccessKeyID` fine but has nothing to split in
+ * `FILEPATH`, `filepath` or `Thumbnailurl`, and a filter that keeps those
+ * fails open on exactly the thing it exists to hide. The cost is that an
+ * ordinary word containing a token (`Monkey`) is dropped too, which is harmless.
  */
 export function stripUrlishKeys(value: unknown): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(asRecord(value))) {
-    if (!keySegments(k).some((seg) => URLISH_SEGMENTS.has(seg))) out[k] = v;
+    if (!URLISH.test(k)) out[k] = v;
   }
   return out;
 }

@@ -56,7 +56,7 @@ describe('stripUrlishKeys', () => {
     ).toEqual({ FileName: 'a.pdf', Size: 10 });
   });
 
-  it('strips each URL/secret-shaped name, whole or as a case segment', () => {
+  it('strips each URL/secret-shaped name, whole, as a case segment, or in a single case', () => {
     const stripped = [
       'FilePath',
       'FileUrl',
@@ -77,12 +77,25 @@ describe('stripUrlishKeys', () => {
       'url',
       'file_path',
       'S3URL',
+      // Names a word-segmenter cannot split: one case throughout, or a lowercase
+      // second word. A filter that keeps these fails open on a fetch URL.
+      'FILEPATH',
+      'filepath',
+      'Thumbnailurl',
+      'TOKENVALUE',
+      'srcset',
     ];
     for (const k of stripped) expect(stripUrlishKeys({ [k]: 'x' }), k).toEqual({});
   });
 
-  it('keeps names that merely contain a token as a substring', () => {
-    const kept = { Monkey: 1, Description: 2, FileName: 3, FileNotExit: 4, Index: 5, Keyboard: 6, Pathway: 7 };
+  it('keeps names that carry no URL/secret token at all', () => {
+    const kept = { Description: 2, FileName: 3, FileNotExit: 4, Index: 5, Size: 6, Thumbnail: 7 };
     expect(stripUrlishKeys(kept)).toEqual(kept);
+  });
+
+  it('errs on the side of stripping: a token inside an ordinary word still drops the key', () => {
+    // `Monkey` contains "key". Dropping a harmless field is the accepted cost of
+    // never letting a session-authorized URL through on an unsplittable name.
+    expect(stripUrlishKeys({ Monkey: 1, Keyboard: 2, Pathway: 3 })).toEqual({});
   });
 });
