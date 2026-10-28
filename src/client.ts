@@ -40,6 +40,15 @@ export type MessageFolder = 'unread' | 'read' | 'sent';
 const MESSAGE_TYPE: Record<MessageFolder, string> = { unread: '1', read: '2', sent: '4' };
 
 /**
+ * The fetchproxy remediation sentence, shared by the not-signed-in error and
+ * the empty-response hint. Each caller adds its own ending (with or without
+ * "then retry"), so it carries no closing punctuation.
+ */
+const FETCHPROXY_SIGN_IN_HINT =
+  'Open your InSync portal (INSYNC_PORTAL) in a Chrome tab and sign in — the bridge ' +
+  'issues requests from inside that tab, so it needs one open';
+
+/**
  * Not signed in to the portal. Carries `kind: 'session_expired'` so the
  * healthcheck classifies it without a regex, and a hint that names the live
  * transport. (A portal-specific type rather than mcp-utils'
@@ -50,8 +59,7 @@ export class InsyncNotSignedInError extends McpToolError {
   constructor(mode: TransportMode) {
     const hint =
       mode === 'fetchproxy'
-        ? 'Open your InSync portal (INSYNC_PORTAL) in a Chrome tab and sign in — the bridge ' +
-          'issues requests from inside that tab, so it needs one open — then retry.'
+        ? `${FETCHPROXY_SIGN_IN_HINT} — then retry.`
         : 'Set INSYNC_USERNAME and INSYNC_PASSWORD so the server can sign in, then retry.';
     super(
       'Not signed in to the InSync patient portal — it returned a sign-in or timeout page.',
@@ -67,6 +75,12 @@ export interface InsyncClientOptions {
   scrubber?: SecretScrubber;
   /** Which transport is in use, for remediation copy. Default `server`. */
   mode?: TransportMode;
+  /**
+   * The configured portal host (e.g. `pfbhintouch.insynchcs.com`). When set, a
+   * download path must resolve to exactly this host; when omitted (tests), any
+   * `*.insynchcs.com` host is accepted.
+   */
+  portalHost?: string;
 }
 
 /** DataTables paging shared by the grid reads. */
@@ -90,24 +104,37 @@ export interface AppointmentPageParams {
   currentPage?: number;
 }
 
-function gridQuery(params: GridParams, extra: Record<string, string>): string {
-  return new URLSearchParams({
+/** The DataTables paging fields with their defaults, as strings for a query or form. */
+function gridParams(params: GridParams): Record<string, string> {
+  return {
     draw: String(params.draw ?? 1),
     start: String(params.start ?? 0),
     length: String(params.length ?? 25),
-    ...extra,
-  }).toString();
+  };
 }
+
+function gridQuery(params: GridParams, extra: Record<string, string>): string {
+  return new URLSearchParams({ ...gridParams(params), ...extra }).toString();
+}
+
+/**
+ * Stand-in base for resolving a relative download path when no portal host is
+ * configured. Any `*.insynchcs.com` name works: it only has to pass the suffix
+ * check, so a relative path is accepted exactly as before.
+ */
+const UNCONFIGURED_PORTAL_HOST = 'portal.insynchcs.com';
 
 export class InsyncClient {
   private readonly transport: InsyncTransport;
   private readonly scrubber: SecretScrubber;
   private readonly mode: TransportMode;
+  private readonly portalHost: string | undefined;
 
   constructor(opts: InsyncClientOptions) {
     this.transport = opts.transport;
     this.scrubber = opts.scrubber ?? new SecretScrubber();
     this.mode = opts.mode ?? 'server';
+    this.portalHost = opts.portalHost;
   }
 
   async start(): Promise<void> {
@@ -130,8 +157,7 @@ export class InsyncClient {
 
   private emptyHint(): string {
     return this.mode === 'fetchproxy'
-      ? 'Open your InSync portal (INSYNC_PORTAL) in a Chrome tab and sign in — the bridge ' +
-          'issues requests from inside that tab, so it needs one open.'
+      ? `${FETCHPROXY_SIGN_IN_HINT}.`
       : 'The session may have lapsed. Retry; the next call signs in again first.';
   }
 
@@ -222,15 +248,12 @@ export class InsyncClient {
 
   async listMessages(params: ListMessagesParams): Promise<unknown> {
     const endpoint = 'Messages/GetMessages';
-    const query = new URLSearchParams({
+    const query = gridQuery(params, {
       messageType: MESSAGE_TYPE[params.folder],
       searchStr: params.search ?? '',
       hasAttachment: String(params.hasAttachment ?? false),
       IsArchived: String(params.archived ?? false),
-      draw: String(params.draw ?? 1),
-      start: String(params.start ?? 0),
-      length: String(params.length ?? 25),
-    }).toString();
+    });
     return this.json(await this.transport.getJson(`${endpoint}?${query}`), endpoint);
   }
 
@@ -272,12 +295,7 @@ export class InsyncClient {
   /** The refill-history grid HTML; parsed by the tool layer. */
   async listRefillRequests(params: GridParams = {}): Promise<string> {
     const path = 'RefillPrescription/RefillPrescripationGrid';
-    const form = {
-      draw: String(params.draw ?? 1),
-      start: String(params.start ?? 0),
-      length: String(params.length ?? 25),
-    };
-    return this.text(await this.transport.postForm(path, form), path);
+    return this.text(await this.transport.postForm(path, gridParams(params)), path);
   }
 
   // --- file transfer (portal endpoints only — never direct S3) ---
@@ -338,12 +356,15 @@ export class InsyncClient {
    * the session, POSTs the form ONCE — never replayed, so a lapsed session that
    * silently re-authenticates cannot resubmit a write as whoever the new session
    * serves — and judges the portal's accept/reject. Returns the portal `Status`
-   * for the tool to surface; throws (nothing written) on rejection.
+   * for the tool to surface; throws (nothing written) on rejection. The HTTP
+   * status is judged first (see {@link submitFormJson}), so a 5xx after the
+   * bytes landed is an UNKNOWN outcome, never a "did not return JSON" error
+   * that reads as safe to retry.
    *
    * Derived from the portal JS, UNVERIFIED on the wire — see docs/INSYNC-API.md.
    */
   async upload(path: string, form: Record<string, string>): Promise<{ status?: string }> {
-    const data = this.json<Record<string, unknown>>(await this.sendForm(path, form), path);
+    const data = await this.submitFormJson(path, form);
     // The portal's success signal differs by handler: the insurance-card save
     // reads `Success`, other saves read `Status == "1"`. Accept either.
     const accepted = data.Success === true || String(data.Status) === '1';
@@ -570,17 +591,25 @@ export class InsyncClient {
     }
   }
 
-  /** Refuse an absolute download URL that leaves the InSync portal domain. */
+  /**
+   * Refuse a download path that leaves the InSync portal. The path is RESOLVED
+   * against the portal first — the way the transport will resolve it — and the
+   * resulting host is judged, so a protocol-relative `//evil.example/x` (which
+   * no "is it absolute?" pattern catches) is seen for the off-portal URL it is.
+   * With a configured portal host the match is exact; without one (tests) it
+   * falls back to the `*.insynchcs.com` suffix.
+   */
   private assertPortalUrl(filePath: string): void {
-    const isAbsolute = /^[a-z][a-z0-9+.-]*:\/\//i.test(filePath);
-    if (!isAbsolute) return; // relative → resolved against the portal by the transport
+    const base = `https://${this.portalHost ?? UNCONFIGURED_PORTAL_HOST}/`;
     let host: string;
     try {
-      host = new URL(filePath).hostname;
+      host = new URL(filePath, base).hostname;
     } catch {
       throw this.fail('The attachment path is not a valid URL.', this.emptyHint());
     }
-    if (!host.endsWith('.insynchcs.com')) {
+    const onPortal =
+      this.portalHost !== undefined ? host === this.portalHost : host.endsWith('.insynchcs.com');
+    if (!onPortal) {
       throw this.fail(
         'Refusing to download this attachment from a host outside the InSync portal.',
         'InSync file downloads go only through the portal, never direct storage (S3).',

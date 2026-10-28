@@ -72,7 +72,7 @@ const LOGIN = '<html><head><title>Portal :: Login</title></head><body></body></h
 
 function client(
   responder: (call: Call) => FetchResult,
-  opts: { mode?: TransportMode; scrubber?: SecretScrubber } = {},
+  opts: { mode?: TransportMode; scrubber?: SecretScrubber; portalHost?: string } = {},
 ): { c: InsyncClient; t: FakeTransport } {
   const t = new FakeTransport(responder);
   return { c: new InsyncClient({ transport: t, ...opts }), t };
@@ -282,6 +282,34 @@ describe('InsyncClient file transfer', () => {
     );
   });
 
+  it('refuses a protocol-relative path, which resolves off the portal', async () => {
+    const { c, t } = client(() => ok('{}'));
+    await expect(c.downloadAttachment('//evil.example/x')).rejects.toThrow(/outside the InSync portal/);
+    const pinned = client(() => ok('{}'), { portalHost: 'pfb.insynchcs.com' });
+    await expect(pinned.c.downloadAttachment('//evil.example/x')).rejects.toThrow(
+      /outside the InSync portal/,
+    );
+    expect([...t.calls, ...pinned.t.calls]).toEqual([]);
+  });
+
+  it('pins downloads to the configured portal host', async () => {
+    const { c, t } = client(() => ok('{}'), { portalHost: 'pfb.insynchcs.com' });
+    t.binary = { status: 200, body: '', bytes: bytes('PDF') };
+    await c.downloadAttachment('/DocumentManager/DownloadFile.ashx?f=1');
+    await c.downloadAttachment('https://pfb.insynchcs.com/DocumentManager/DownloadFile.ashx?f=2');
+    expect(t.calls.map((x) => x.path)).toEqual([
+      '/DocumentManager/DownloadFile.ashx?f=1',
+      'https://pfb.insynchcs.com/DocumentManager/DownloadFile.ashx?f=2',
+    ]);
+    // Another practice's portal is still off-portal once the host is known.
+    await expect(c.downloadAttachment('https://other.insynchcs.com/x')).rejects.toThrow(
+      /outside the InSync portal/,
+    );
+    await expect(c.downloadAttachment('//other.insynchcs.com/x')).rejects.toThrow(
+      /outside the InSync portal/,
+    );
+  });
+
   it('refuses an unparseable absolute attachment path', async () => {
     const { c } = client(() => ok('{}'));
     await expect(c.downloadAttachment('http://')).rejects.toThrow(/not a valid URL/);
@@ -448,6 +476,27 @@ describe('InsyncClient writes', () => {
     await expect(client(withToken({ status: 404, body: '' })).c.submitFormJson('X/Y', {})).rejects.toThrow(
       /HTTP 404/,
     );
+  });
+
+  it('uploads through the write-status guard: 5xx is UNKNOWN, 4xx applied nothing', async () => {
+    const five = client(withToken({ status: 500, body: '<html><title>Server Error</title></html>' }));
+    const fiveRun = five.c.upload('PatientProfile/SaveInsuranceCardImages', { a: '1' });
+    await expect(fiveRun).rejects.toBeInstanceOf(WriteOutcomeUnknownError);
+    await expect(fiveRun).rejects.toMatchObject({ hint: expect.stringMatching(/HTTP 500/) });
+    const four = client(withToken({ status: 400, body: '' })).c.upload('X/Y', {});
+    await expect(four).rejects.toThrow(/refused X\/Y with HTTP 400/);
+    await expect(four).rejects.toMatchObject({ hint: expect.stringMatching(/Nothing was applied/) });
+    await expect(four).rejects.not.toBeInstanceOf(WriteOutcomeUnknownError);
+  });
+
+  it('accepts an upload by Success or by Status "1", and refuses anything else', async () => {
+    const byFlag = client(withToken(ok('{"Success":true}')));
+    expect(await byFlag.c.upload('X/Y', { a: '1' })).toEqual({ status: undefined });
+    expect(byFlag.t.calls[1]).toMatchObject({ verb: 'postForm', opts: { replay: false } });
+    expect(await client(withToken(ok('{"Status":1}'))).c.upload('X/Y', {})).toEqual({ status: '1' });
+    await expect(
+      client(withToken(ok('{"Success":false,"Status":"0"}'))).c.upload('X/Y', {}),
+    ).rejects.toThrow(/did not accept the upload/);
   });
 
   it('submits JSON once, never replayed, and parses the answer', async () => {

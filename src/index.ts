@@ -71,7 +71,7 @@ if (mode === 'server') {
   await bridge.start();
 }
 
-const client = new InsyncClient({ transport, scrubber, mode });
+const client = new InsyncClient({ transport, scrubber, mode, portalHost: host });
 const downloadIO = makeDownloadIO();
 
 await runMcp({
