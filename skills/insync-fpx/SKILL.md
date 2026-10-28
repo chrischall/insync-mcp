@@ -69,9 +69,11 @@ Endpoint catalog (≈150 actions, with request shapes) for extending this:
   sign-in deep-link token; `surveys` returns only name + date.
 - Sender names, provider names, medications and visit types are PHI. Show only
   what the question needs.
-- No writes are wired (send message, request appointment, refill request, pay,
-  form submit). The endpoints are listed in `references/endpoints.md`. Each would
-  need a live request capture and explicit user confirmation before use.
+- No writes are wired in this skill (send message, request appointment, refill
+  request, pay, form submit). The insync-mcp server carries confirm-gated
+  messages, refill, appointment and cancellation requests; their request shapes
+  are in its `docs/INSYNC-API.md`. Never hand-roll one here without explicit
+  user confirmation.
 
 ## Exit codes
 

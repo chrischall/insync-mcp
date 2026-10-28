@@ -4,7 +4,8 @@ MCP server for an **InSync Healthcare (Qualifacts)** patient portal — the
 behavioral-health portals at `https://<practice>intouch.insynchcs.com` (the
 owner's is `pfbhintouch`). It reads appointments, medications, allergies, secure
 messages, forms, surveys, documents, profile and account balance; downloads
-portal files; and uploads an insurance-card image.
+portal files; uploads an insurance-card image; and sends secure messages,
+refill requests, appointment requests and cancellation requests.
 
 > This project was developed and is maintained by AI. Use at your own discretion.
 > It reads personal health information, and only ever from the signed-in user's own account.
@@ -23,10 +24,21 @@ This server is **not** read-only. Alongside the reads it:
   the practice can see and which has no inverse. That tool is annotated
   `destructive` and gated behind `allow_mark_read` (default false): until you
   pass it, the tool returns the list-row metadata and a note, and never fetches
-  the detail.
+  the detail;
+- **sends things to the practice**, each one confirm-gated and annotated
+  `destructive`, because none can be unsent or withdrawn through this server:
 
-Out of scope, and deliberately not built: composing/replying to messages,
-refill requests, appointment requests, and cancellations.
+  | Tool | What it sends | Look up first with |
+  |---|---|---|
+  | `insync_send_message` | a new secure message to a practice group | `insync_list_message_recipients` |
+  | `insync_reply_message` | a reply to a message (refuses an unread one unless `allow_mark_read`) | `insync_list_messages` |
+  | `insync_request_refill` | a refill request for current medications | `insync_get_refill_options` |
+  | `insync_request_appointment` | an appointment **request** in an open slot (the practice confirms it) | `insync_find_appointment_slots` |
+  | `insync_cancel_appointment` | a cancellation **request** with a reason (the practice reviews it) | `insync_list_appointments` |
+
+Not built: message attachments and patient signatures on messages, the
+"flexible window" appointment request, withdrawing a request, payments, and
+form submission.
 
 ## Two ways to authenticate
 
@@ -62,7 +74,21 @@ captured onto the session only, and is **scrubbed by value** from every tool
 result, error and log. A download URL is refused unless it stays on
 `*.insynchcs.com`.
 
-## Insurance-card upload is unverified on the wire
+## Writes are unverified on the wire
+
+Every lookup the write tools make — recipients, the reply form, the refill pick
+lists, facilities, providers, visit types, slots, the cancellation window — was
+**verified live, read-only**. The sends are **derived from the portal's own
+JavaScript and partial views**. A new message (`insync_send_message`) and a
+reply (`insync_reply_message`) were **verified live** on 2026-10-28 in
+owner-supervised tests; the refill, appointment and cancellation sends have not
+been exercised yet, because each one creates a request the practice acts on. A send that the portal
+answers with a 5xx, or whose connection drops, is reported as
+`status: "unknown"` rather than as an error, so a model checks the matching
+list before trying again instead of sending twice. See
+[`docs/INSYNC-API.md`](docs/INSYNC-API.md).
+
+### Insurance-card upload
 
 The insurance-card upload shape is **derived from the portal's own JavaScript**
 and is **UNVERIFIED on a live POST**: no automated run performs a real upload,
@@ -73,11 +99,14 @@ See [`docs/INSYNC-API.md`](docs/INSYNC-API.md).
 
 ## Confirm gate
 
-`insync_upload_insurance_card` is gated by `@chrischall/mcp-utils`' `confirmWrite`.
-The first call reads nothing from the portal and returns a **preview + a
-`confirmToken`**; only a second call carrying that token — after you approve the
-preview — uploads. The exact image bytes and the shown preview are bound into the
-token, so a file or argument that changed since the preview is refused as
+Every write is gated by `@chrischall/mcp-utils`' `confirmWrite` (the
+send/request tools through its `defineWrite` / `registerWrite`). The first call
+sends nothing and returns a **preview + a `confirmToken`**; only a second call
+carrying that token — after you approve the preview — sends. The send/request
+tools may read the portal while previewing (to resolve names and check the slot
+or recipient); the upload preview reads nothing. The exact request body (for the
+upload, the image bytes) and the shown preview are bound into the token, so an
+argument, file or portal state that changed since the preview is refused as
 `DRAFT_CHANGED`. `MCP_CONFIRM_MODE` / `MCP_CONFIRM_ELICITATION` tune this (see the
 env table).
 
@@ -117,8 +146,8 @@ prints a pair code to approve once in the extension popup.
 | `INSYNC_WS_PORT` | no | `37149` | fetchproxy concentrator port. The whole fleet shares it; override only when hosting. |
 | `INSYNC_OUTPUT_DIR` | no | `~/Downloads`, `~/Documents` | Where downloaded files are written (a path-delimiter list; `~` expands). A per-call `dest` must resolve inside one of these. |
 | `INSYNC_INLINE_DOWNLOADS` | no | `false` | `true` returns downloaded bytes inline (base64) instead of writing to disk — for a hosted runner whose disk you cannot reach. |
-| `MCP_CONFIRM_MODE` | no | `ask-user` | Confirm-gate mode for the upload. `ask-user` = preview + `confirmToken` round-trip; `auto` lets a capable host confirm in one step; an unrecognised value fails closed (`refuse`). |
-| `MCP_CONFIRM_ELICITATION` | no | `on` | `on` lets the host confirm the upload interactively; `off` forces the `confirmToken` round-trip. |
+| `MCP_CONFIRM_MODE` | no | `ask-user` | Confirm-gate mode for every write. `ask-user` = preview + `confirmToken` round-trip; `auto` lets a capable host confirm in one step; an unrecognised value fails closed (`refuse`). |
+| `MCP_CONFIRM_ELICITATION` | no | `on` | `on` lets the host confirm a write interactively; `off` forces the `confirmToken` round-trip. |
 
 A `.env` is read for local development; real environment values always win. See
 [`.env.example`](.env.example).

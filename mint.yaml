@@ -2,9 +2,9 @@ version: 1
 name: InSync Patient Portal
 slug: insync
 summary: >-
-  Read your InSync (Qualifacts) behavioral-health portal: appointments,
-  medications, allergies, messages, forms, surveys, balance. Plus file
-  downloads and a confirm-gated insurance-card upload.
+  Use your InSync (Qualifacts) behavioral-health portal: appointments, meds,
+  messages, forms, balance and files, plus confirm-gated messages and
+  refill, appointment and cancellation requests.
 
 # Sample prompts for the public catalog.
 examples:
@@ -28,9 +28,10 @@ examples:
 # the control API, since this manifest has no column for them. Prefer the
 # credential path.
 #
-# NOT read-only: besides reads it downloads portal files and uploads an insurance
-# card (confirm-gated, destructive), and opening an UNREAD message can mark it
-# read (visible to the practice, no inverse — insync_get_message gates that
+# NOT read-only: besides reads it downloads portal files; sends secure messages
+# and replies, refill requests, appointment requests and cancellation requests,
+# and uploads an insurance card (all confirm-gated, destructive); and opening an
+# UNREAD message can mark it read (visible to the practice, no inverse — insync_get_message gates that
 # behind allow_mark_read). The practice-wide AWS S3 credentials the login carries
 # are held server-side and are scrubbed from every result, error and log; file
 # transfer goes only through the portal's own session-authorized endpoints,
@@ -73,14 +74,15 @@ env:
   - name: MCP_CONFIRM_MODE
     required: false
     help: >-
-      Confirm-gate behaviour for the insurance-card upload. ask-user (default)
+      Confirm-gate behaviour for every write (messages, requests, the
+      insurance-card upload). ask-user (default)
       returns a preview + confirmToken and requires a second call with that
       token; auto lets a capable host confirm in one step; an unrecognised value
       fails closed (refuse).
   - name: MCP_CONFIRM_ELICITATION
     required: false
     help: >-
-      on (default) lets the host confirm the upload interactively (elicitation);
+      on (default) lets the host confirm a write interactively (elicitation);
       off forces the confirmToken round-trip.
 
 identity:

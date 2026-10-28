@@ -1,7 +1,7 @@
 {
   "name": "@chrischall/insync-mcp",
   "version": "0.0.0",
-  "description": "Read-only MCP server for InSync Healthcare (Qualifacts) patient portals: appointments, medications, allergies, messages, forms and balance.",
+  "description": "MCP server for InSync Healthcare (Qualifacts) patient portals: appointments, medications, allergies, messages, forms and balance, plus confirm-gated messages and refill, appointment and cancellation requests.",
   "type": "module",
   "bin": {
     "insync-mcp": "dist/bundle.js"
