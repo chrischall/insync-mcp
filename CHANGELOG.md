@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/chrischall/insync-mcp/compare/v0.2.1...v0.2.2) (2026-10-29)
+
+
+### Bug Fixes
+
+* **deps:** require the MCP SDK ^2.4.0 that mcp-utils 3.4.0 peer-requires ([#11](https://github.com/chrischall/insync-mcp/issues/11)) ([c6fe73d](https://github.com/chrischall/insync-mcp/commit/c6fe73d50dfb08f6afb3597287e6894bc9f59a8b))
+
 ## [0.2.1](https://github.com/chrischall/insync-mcp/compare/v0.2.0...v0.2.1) (2026-10-29)
 
 
