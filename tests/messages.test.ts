@@ -33,7 +33,10 @@ const DETAIL = {
     PatientName: 'Pat Example',
     TaskMessage: '<p>Hello Pat.</p><p>Your results are ready.</p>',
   },
-  MessageAttachments: [{ FileName: 'results.pdf', FilePath: 'https://secret.example/download?token=abc' }],
+  MessageAttachments: [
+    { FileName: 'results.pdf', FilePath: 'https://secret.example/download?token=abc' },
+    { FileName: 'scan.png', FILEPATH: '/docs/scan.png', Thumbnailurl: 'https://secret.example/t' },
+  ],
 };
 
 describe('insync_list_messages', () => {
@@ -105,7 +108,7 @@ describe('insync_get_message unread gate', () => {
     expect(out.subject).toBe('Your lab results');
     expect(out.body).toBe('Hello Pat. Your results are ready.');
     // Attachment metadata is kept but its fetch URL is stripped.
-    expect((out.attachments as Record<string, unknown>[])[0]).toEqual({ FileName: 'results.pdf' });
+    expect(out.attachments).toEqual([{ FileName: 'results.pdf' }, { FileName: 'scan.png' }]);
     expect(transport.calls.some((call) => call.path.includes('GetMessageDetail'))).toBe(true);
   });
 
