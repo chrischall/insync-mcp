@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/chrischall/insync-mcp/compare/v0.2.0...v0.2.1) (2026-10-29)
+
+
+### Bug Fixes
+
+* **deps:** require mcp-utils 3.4.0 and use its shared stripUrlishKeys ([#9](https://github.com/chrischall/insync-mcp/issues/9)) ([4c4ecc5](https://github.com/chrischall/insync-mcp/commit/4c4ecc5f351350a86ef48d8310e70cd088918001))
+
 ## [0.2.0](https://github.com/chrischall/insync-mcp/compare/v0.1.0...v0.2.0) (2026-10-29)
 
 
