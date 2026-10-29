@@ -1,9 +1,9 @@
 import { z } from 'zod';
-import { untrustedResult } from '@chrischall/mcp-utils';
+import { stripUrlishKeys, untrustedResult } from '@chrischall/mcp-utils';
 import { htmlToReadableText } from '@chrischall/mcp-utils/html';
 import type { McpServer } from '@modelcontextprotocol/server';
 import type { InsyncClient, MessageFolder } from '../client.js';
-import { READ, asRecord, asRecordArray, stripUrlishKeys, tidy } from './_shared.js';
+import { READ, asRecord, asRecordArray, tidy } from './_shared.js';
 import { ASSEMBLED_VIEWS, assembledViewArg, untrustedViewResponse } from '../view.js';
 import { WRITE } from './_writes.js';
 
@@ -149,7 +149,7 @@ export function registerMessageTools(server: McpServer, client: InsyncClient): v
             patient: detail.PatientName,
             body: htmlToReadableText(typeof detail.TaskMessage === 'string' ? detail.TaskMessage : ''),
             attachments: Array.isArray(attachments)
-              ? asRecordArray(attachments).map(stripUrlishKeys)
+              ? asRecordArray(attachments).map((a) => stripUrlishKeys(a))
               : undefined,
           });
         },

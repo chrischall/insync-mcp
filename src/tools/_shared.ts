@@ -55,26 +55,3 @@ export function tidy(obj: Record<string, unknown>): Record<string, unknown> {
 export function cleanCellText(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
 }
-
-/** The words that mark a key name as a URL, path, token or secret. */
-const URLISH = /path|url|uri|src|source|link|href|token|secret|key|sas|signature/i;
-
-/**
- * Drop any key whose NAME looks like a URL, path, token or secret. Used on
- * message-attachment metadata so a session-authorized fetch URL never lands in
- * the transcript — the attachment bytes are the download tools' job, not a
- * read's.
- *
- * Deliberately a SUBSTRING match, not a word match. Splitting a name into
- * words reads `DownloadUrl` and `AccessKeyID` fine but has nothing to split in
- * `FILEPATH`, `filepath` or `Thumbnailurl`, and a filter that keeps those
- * fails open on exactly the thing it exists to hide. The cost is that an
- * ordinary word containing a token (`Monkey`) is dropped too, which is harmless.
- */
-export function stripUrlishKeys(value: unknown): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(asRecord(value))) {
-    if (!URLISH.test(k)) out[k] = v;
-  }
-  return out;
-}

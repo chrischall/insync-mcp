@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { asRecord, asRecordArray, cleanCellText, sameId, stripUrlishKeys } from '../src/tools/_shared.js';
+import { asRecord, asRecordArray, cleanCellText, sameId } from '../src/tools/_shared.js';
 
 describe('asRecord', () => {
   it('returns a plain object as-is and anything else as {}', () => {
@@ -39,63 +39,5 @@ describe('cleanCellText', () => {
     // literal "&amp;" surviving in that text was "&amp;amp;" in the HTML, so
     // decoding it again would corrupt what the practice actually wrote.
     expect(cleanCellText('a &amp; b')).toBe('a &amp; b');
-  });
-});
-
-describe('stripUrlishKeys', () => {
-  it('drops URL/path/token/key-shaped keys and keeps the rest', () => {
-    expect(
-      stripUrlishKeys({
-        FileName: 'a.pdf',
-        FilePath: '/x',
-        DownloadUrl: 'http://x',
-        AccessKeyID: 'k',
-        Token: 't',
-        Size: 10,
-      }),
-    ).toEqual({ FileName: 'a.pdf', Size: 10 });
-  });
-
-  it('strips each URL/secret-shaped name, whole, as a case segment, or in a single case', () => {
-    const stripped = [
-      'FilePath',
-      'FileUrl',
-      'Url',
-      'URL',
-      'Uri',
-      'Src',
-      'Source',
-      'Link',
-      'Href',
-      'Token',
-      'Secret',
-      'Key',
-      'AccessKey',
-      'SasToken',
-      'Signature',
-      'DownloadUrl',
-      'url',
-      'file_path',
-      'S3URL',
-      // Names a word-segmenter cannot split: one case throughout, or a lowercase
-      // second word. A filter that keeps these fails open on a fetch URL.
-      'FILEPATH',
-      'filepath',
-      'Thumbnailurl',
-      'TOKENVALUE',
-      'srcset',
-    ];
-    for (const k of stripped) expect(stripUrlishKeys({ [k]: 'x' }), k).toEqual({});
-  });
-
-  it('keeps names that carry no URL/secret token at all', () => {
-    const kept = { Description: 2, FileName: 3, FileNotExit: 4, Index: 5, Size: 6, Thumbnail: 7 };
-    expect(stripUrlishKeys(kept)).toEqual(kept);
-  });
-
-  it('errs on the side of stripping: a token inside an ordinary word still drops the key', () => {
-    // `Monkey` contains "key". Dropping a harmless field is the accepted cost of
-    // never letting a session-authorized URL through on an unsplittable name.
-    expect(stripUrlishKeys({ Monkey: 1, Keyboard: 2, Pathway: 3 })).toEqual({});
   });
 });
