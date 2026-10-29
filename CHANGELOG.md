@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.2.0](https://github.com/chrischall/insync-mcp/compare/v0.1.0...v0.2.0) (2026-10-29)
+
+
+### Features
+
+* confirm-gated messages, refill, appointment and cancellation requests ([#2](https://github.com/chrischall/insync-mcp/issues/2)) ([4487db2](https://github.com/chrischall/insync-mcp/commit/4487db252609c81d3f8f75b99332d4b97c780113))
+
+
+### Bug Fixes
+
+* **security:** fail closed in stripUrlishKeys and origin-check the first login handoff hop ([#6](https://github.com/chrischall/insync-mcp/issues/6)) ([8c41b87](https://github.com/chrischall/insync-mcp/commit/8c41b87dbc6bbdf037200b96e64c1b451810d6d5)), closes [#5](https://github.com/chrischall/insync-mcp/issues/5)
+* **security:** pin session cookies to the portal host and harden write, download and unread-gate paths ([#4](https://github.com/chrischall/insync-mcp/issues/4)) ([0a93700](https://github.com/chrischall/insync-mcp/commit/0a93700e973e6d8bcfc0552b54fa3fe4161d48a7))
+
+
+### Refactor
+
+* **transport:** adopt mcp-utils CookieJar and one shared per-hop origin check ([#7](https://github.com/chrischall/insync-mcp/issues/7)) ([756c126](https://github.com/chrischall/insync-mcp/commit/756c1260a8989c1dcb10029504b093d42857fa04))
+
 ## 0.1.0 (2026-10-28)
 
 
