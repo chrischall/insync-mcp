@@ -7,7 +7,7 @@
   },
   "metadata": {
     "description": "MCP server for InSync Healthcare (Qualifacts) patient portals — read appointments, medications, allergies, messages, forms and balance, download portal files, and upload an insurance card (confirm-gated). Signs in server-side with the portal password, or relays requests through the user's signed-in browser tab via the ContextMint Bridge extension.",
-    "version": "0.2.1"
+    "version": "0.2.2"
   },
   "plugins": [
     {
@@ -15,7 +15,7 @@
       "displayName": "InSync Patient Portal",
       "source": "./",
       "description": "Access an InSync Healthcare (Qualifacts) patient portal — read appointments, medications, allergies, messages, forms and balance, download files, and upload an insurance card (confirm-gated) — by signing in server-side or relaying through the user's signed-in browser tab.",
-      "version": "0.2.1",
+      "version": "0.2.2",
       "author": {
         "name": "Chris Hall"
       },

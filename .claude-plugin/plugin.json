@@ -1,7 +1,7 @@
 {
   "name": "insync-mcp",
   "displayName": "InSync Patient Portal",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Access an InSync Healthcare (Qualifacts) patient portal — read appointments, medications, allergies, messages, forms and balance, download files, and upload an insurance card (confirm-gated)",
   "author": {
     "name": "Chris Hall",
