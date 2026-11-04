@@ -3,6 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import type { InsyncClient } from '../client.js';
 import { READ, asRecord } from './_shared.js';
 import { assembledViewArg, assembledViewResponse } from '../view.js';
+import { healthMeta } from './hints.js';
 
 const SECRET_KEY = /pass|pwd|hash|token|secret/i;
 
@@ -35,6 +36,7 @@ export function registerProfileTools(server: McpServer, client: InsyncClient): v
   server.registerTool(
     'insync_get_profile',
     {
+      _meta: healthMeta('lookup'),
       description:
         'Get the patient’s demographic profile — name, date of birth, contact details and ' +
         'the other scalar fields on file. The profile photo, picklists and any credential-shaped ' +

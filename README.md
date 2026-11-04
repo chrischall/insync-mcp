@@ -161,6 +161,16 @@ from a shell through your signed-in browser tab with the
 then curl the endpoints). Use it when you want portal data in a script or without
 the MCP installed. The MCP is the richer surface; the skill is the quick path.
 
+## Context groups
+
+Every tool except `insync_healthcheck` publishes a `_meta.mint` hint (group
+`health`) for mcp-host's context groups: inert data to any other client. The
+three canonical reads — `insync_list_appointments` (what's on),
+`insync_list_messages` (what's new) and `insync_list_forms` (what's due) — also
+take `view: "brief"`, one line per item, `title — <ISO date | no date> —
+<status>`, inside the untrusted-data envelope. The other `view` values are
+unchanged.
+
 ## How it works
 
 The portal is ASP.NET MVC. A signed-out session is never a `401`: it is the login

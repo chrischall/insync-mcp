@@ -3,10 +3,15 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import { parse } from 'node-html-parser';
 import type { InsyncClient } from '../client.js';
 import { READ, asRecord, asRecordArray, cleanCellText, tidy } from './_shared.js';
+import { healthMeta } from './hints.js';
 import {
   ASSEMBLED_VIEWS,
   PASSTHROUGH_VIEWS,
   assembledViewArg,
+  briefLine,
+  briefNotes,
+  mdyToIso,
+  untrustedBriefResponse,
   untrustedViewResponse,
   viewArg,
   viewResponse,
@@ -33,6 +38,22 @@ export function sanitizeFormRecord(record: Record<string, unknown>): Record<stri
     if (!(FORM_SECRET_FIELDS as readonly string[]).includes(k)) out[k] = v;
   }
   return out;
+}
+
+const FORM_VIEWS = [...PASSTHROUGH_VIEWS, 'brief'] as const;
+
+/**
+ * One form as `<name> — <ISO date> — <to complete | status>`: a "Sent" form is
+ * waiting on the patient, dated when it was sent; any other is dated by when it
+ * was last handed back.
+ */
+export function formBrief(f: Record<string, unknown>): string {
+  const name = typeof f.FormName === 'string' && f.FormName.trim() !== '' ? f.FormName.trim() : 'Form';
+  const pending = f.Status === 'Sent';
+  const firstDate = (keys: string[]) =>
+    keys.map((k) => mdyToIso(f[k])).find((d) => d !== 'no date') ?? 'no date';
+  const date = pending ? firstDate(['SentOn']) : firstDate(['LastSubmittedOn', 'ReceivedOn', 'SentOn']);
+  return briefLine(name, date, pending ? 'to complete' : typeof f.Status === 'string' ? f.Status : '');
 }
 
 /**
@@ -62,21 +83,33 @@ export function registerDocumentTools(server: McpServer, client: InsyncClient): 
         'what still needs completing; "all" includes submitted ones. Form names are shown; the ' +
         'form markup and the login credentials the portal embeds are never returned.',
       annotations: READ,
+      _meta: healthMeta('whats-due', {
+        canonical: true,
+        aliases: ['paperwork', 'forms', 'intake forms', 'consent forms', 'forms to fill out'],
+      }),
       inputSchema: z.object({
         status: z
           .enum(['pending', 'all'])
           .default('pending')
           .describe('"pending" = awaiting the patient (Status "Sent"); "all" = every form. Default pending.'),
-        view: viewArg(
-          'compact projects each form to name, status and dates; "full" and "raw" return every ' +
-            'OTHER field the portal sends for a form — never its embedded credentials or markup.',
-        ),
+        view: z
+          .enum(FORM_VIEWS)
+          .optional()
+          .describe(
+            'compact (default) projects each form to name, status and dates; "full" and "raw" return every ' +
+              'OTHER field the portal sends for a form — never its embedded credentials or markup; "brief" ' +
+              'returns one line per form: <name> — <ISO date> — <to complete | status>.',
+          ),
       }),
     },
     async ({ status, view }) => {
       const raw = await client.listForms();
       const all = asRecordArray(asRecord(raw).PatientFormcollection).map(sanitizeFormRecord);
       const forms = status === 'pending' ? all.filter((f) => f.Status === 'Sent') : all;
+      if (view === 'brief') {
+        const lines = [...forms.map(formBrief), ...briefNotes(forms.length, forms.length, forms.length)];
+        return untrustedBriefResponse(lines, 'Form names are written by your practice.');
+      }
       return untrustedViewResponse({
         view,
         views: PASSTHROUGH_VIEWS,
@@ -106,6 +139,7 @@ export function registerDocumentTools(server: McpServer, client: InsyncClient): 
         'List patient satisfaction / outcome surveys the practice has sent, with each survey’s ' +
         'name and the date it was received.',
       annotations: READ,
+      _meta: healthMeta('whats-due', { aliases: ['surveys', 'questionnaires'] }),
       inputSchema: z.object({ view: assembledViewArg() }),
     },
     async ({ view }) => {
@@ -127,6 +161,7 @@ export function registerDocumentTools(server: McpServer, client: InsyncClient): 
         'List documents filed to the patient’s portal account. Use the download tools to ' +
         'retrieve a document’s contents.',
       annotations: READ,
+      _meta: healthMeta('lookup', { aliases: ['documents', 'records', 'files'] }),
       inputSchema: z.object({ view: viewArg() }),
     },
     async ({ view }) => {

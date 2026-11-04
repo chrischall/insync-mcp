@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 import type { InsyncClient } from '../client.js';
 import { READ, asRecord, asRecordArray, tidy } from './_shared.js';
+import { healthMeta } from './hints.js';
 import { viewArg, viewResponse } from '../view.js';
 
 export function registerDashboardTools(server: McpServer, client: InsyncClient): void {
@@ -12,6 +13,7 @@ export function registerDashboardTools(server: McpServer, client: InsyncClient):
         'Get the patient dashboard badge counts: unread messages, medications, allergies, ' +
         'problems, lab results, immunizations, and pending patient forms and surveys.',
       annotations: READ,
+      _meta: healthMeta('whats-new'),
       inputSchema: z.object({ view: viewArg() }),
     },
     async ({ view }) => {
@@ -46,6 +48,7 @@ export function registerDashboardTools(server: McpServer, client: InsyncClient):
       description:
         'Get the patient account balance: the amount owed (net due) and any credit balance.',
       annotations: READ,
+      _meta: healthMeta('whats-due', { aliases: ['bill', 'balance', 'what i owe', 'copay'] }),
       inputSchema: z.object({ view: viewArg() }),
     },
     async ({ view }) => {

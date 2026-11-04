@@ -75,6 +75,27 @@ Endpoint catalog (≈150 actions, with request shapes) for extending this:
   are in its `docs/INSYNC-API.md`. Never hand-roll one here without explicit
   user confirmation.
 
+## In context groups
+
+The insync-mcp server (not this skill) is in the **health** context group on
+mcp-host. Every tool except `insync_healthcheck` carries a `_meta.mint` hint;
+the group's canonical reads are:
+
+| question | tool | brief line |
+|---|---|---|
+| what's on | `insync_list_appointments` (upcoming) | `<type> with <provider> at <facility> — <ISO start> — <status>` |
+| what's new | `insync_list_messages` (unread folder) | `<subject> (from <sender>) — <ISO date> — <folder>` |
+| what's due | `insync_list_forms` (pending) | `<form> — <ISO sent date> — to complete` |
+
+Each answers `view: "brief"` inside the untrusted-data envelope (`data` is the
+line list, because the text is the practice's), ending in `-- none` when empty
+or `-- N of M shown` / `-- more` when a page is partial. There is no subject
+argument: one portal login is one patient. A compound ask such as "any therapy
+appointments this week, and anything due at the doctor?" fans out to the
+appointments and forms reads alongside the group's other members. When the
+server runs bridged (no `INSYNC_USERNAME`/`INSYNC_PASSWORD`), the group answers
+"needs your browser open" for InSync until a signed-in portal tab is open.
+
 ## Exit codes
 
 `0` ok · `1` usage · `2` bridge down, pairing pending, or no tab open on

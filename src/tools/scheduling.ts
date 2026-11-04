@@ -27,6 +27,7 @@ import { inputValue } from '../forms.js';
 import { isoToMdy } from './appointments.js';
 import { READ, asRecord, asRecordArray, sameId, tidy } from './_shared.js';
 import { WRITE, compactResult, sendOnce, writeDescription } from './_writes.js';
+import { healthMeta, withToolMeta } from './hints.js';
 
 /**
  * "Now" as the portal's slot lookup takes it (`MM/DD/YYYY hh:mm AM`), so
@@ -171,6 +172,7 @@ export function registerSchedulingTools(server: McpServer, client: InsyncClient)
   server.registerTool(
     'insync_find_appointment_slots',
     {
+      _meta: healthMeta('lookup', { aliases: ['open appointments', 'availability', 'open slots'] }),
       description:
         'Find open appointment-request slots on a date: the practice’s facilities, the providers ' +
         'bookable there, the visit types and the open times for one provider (default: your ' +
@@ -207,209 +209,213 @@ export function registerSchedulingTools(server: McpServer, client: InsyncClient)
     },
   );
 
-  registerWrite(
-    server,
-    defineWrite({
-      name: 'insync_request_appointment',
-      description: writeDescription(
-        'Request an appointment in an open slot (find one with insync_find_appointment_slots). ' +
-          'This sends a REQUEST the practice must confirm; it is not a booking, and this server ' +
-          'cannot withdraw it.',
-      ),
-      annotations: WRITE,
-      inputSchema: z.object({
-        date: IsoDate.describe('The slot date, YYYY-MM-DD.'),
-        time: NonEmptyString.describe('The slot time exactly as insync_find_appointment_slots lists it, e.g. "09:00 AM".'),
-        provider_id: NumericIdString.describe('Provider id, from insync_find_appointment_slots.'),
-        facility_id: NumericIdString.optional().describe('Facility id. Default: your primary facility.'),
-        visit_type_id: NumericIdString.optional().describe('Visit type id, from insync_find_appointment_slots.'),
-        comments: z.string().max(1000).optional().describe('A note for the practice (optional).'),
-        telemedicine: z.boolean().default(false).describe('Ask for a telemedicine (video) visit. Default false.'),
+  withToolMeta(server, healthMeta('change', { aliases: ['book an appointment', 'schedule therapy', 'make an appointment'] }), () =>
+    registerWrite(
+      server,
+      defineWrite({
+        name: 'insync_request_appointment',
+        description: writeDescription(
+          'Request an appointment in an open slot (find one with insync_find_appointment_slots). ' +
+            'This sends a REQUEST the practice must confirm; it is not a booking, and this server ' +
+            'cannot withdraw it.',
+        ),
+        annotations: WRITE,
+        inputSchema: z.object({
+          date: IsoDate.describe('The slot date, YYYY-MM-DD.'),
+          time: NonEmptyString.describe('The slot time exactly as insync_find_appointment_slots lists it, e.g. "09:00 AM".'),
+          provider_id: NumericIdString.describe('Provider id, from insync_find_appointment_slots.'),
+          facility_id: NumericIdString.optional().describe('Facility id. Default: your primary facility.'),
+          visit_type_id: NumericIdString.optional().describe('Visit type id, from insync_find_appointment_slots.'),
+          comments: z.string().max(1000).optional().describe('A note for the practice (optional).'),
+          telemedicine: z.boolean().default(false).describe('Ask for a telemedicine (video) visit. Default false.'),
+        }),
+        async plan(args) {
+          const s = await loadSchedule(client, {
+            date: args.date,
+            facilityId: args.facility_id,
+            providerId: args.provider_id,
+            visitTypeId: args.visit_type_id,
+          });
+          // loadSchedule throws for an explicit provider it cannot find.
+          const provider = s.provider as Record<string, unknown>;
+          const visitType =
+            args.visit_type_id === undefined
+              ? undefined
+              : s.visitTypes.find((v) => sameId(v.EncounterTypeID, args.visit_type_id));
+          if (args.visit_type_id !== undefined && visitType === undefined) {
+            throw new McpToolError(`Visit type ${args.visit_type_id} is not offered by this provider.`, {
+              hint: 'Use a visit type id from insync_find_appointment_slots.',
+            });
+          }
+          if (visitType === undefined && s.visitTypeMandatory) {
+            throw new McpToolError('This practice requires a visit type on appointment requests.', {
+              hint: 'Pass visit_type_id from insync_find_appointment_slots.',
+            });
+          }
+          const slot = openSlots(s.slots).find((x) => x.Time === args.time);
+          if (slot === undefined) {
+            throw new McpToolError(`${args.time} on ${args.date} is not an open slot for that provider.`, {
+              hint: 'Pick a time insync_find_appointment_slots lists for the same date and provider.',
+            });
+          }
+          const body = buildAppointmentRequest({
+            facilityId: String(s.facility.FacilityId),
+            provider,
+            date: isoToMdy(args.date),
+            slot,
+            visitTypeId: visitType?.EncounterTypeID ?? '',
+            comments: args.comments ?? '',
+            telemedicine: args.telemedicine === true,
+          });
+          const summary = {
+            date: args.date,
+            time: args.time,
+            provider: provider.ProviderName,
+            facility: s.facility.FacilityName,
+            visitType: visitType?.EncounterType,
+          };
+          return {
+            gate: {
+              action: 'insync.request_appointment',
+              summary: `Request an appointment with ${String(provider.ProviderName)} on ${args.date} at ${args.time}`,
+              account: undefined,
+              request: { method: 'POST', path: 'PatientScheduler/SaveAppointmentReq', body },
+              willSend: tidy({ ...summary, comments: args.comments, telemedicine: args.telemedicine === true }),
+              preview: { note: 'This is a request; the practice confirms or declines it.' },
+            },
+            state: { body, summary },
+          };
+        },
+        async execute({ body, summary }) {
+          return sendOnce(
+            async () => {
+              const data = await client.submitJson('PatientScheduler/SaveAppointmentReq', body);
+              const result = asRecord(data.resultModel);
+              const status = Number(result.Status);
+              if (status === 2) {
+                throw new McpToolError('That slot is already booked.', {
+                  hint: 'Nothing was requested. Pick another slot with insync_find_appointment_slots.',
+                });
+              }
+              if (status === 4) {
+                throw new McpToolError(`The practice declined the request: ${String(result.ResponseMsg)}`, {
+                  hint: 'Nothing was requested.',
+                });
+              }
+              if (status !== 1) {
+                throw new McpToolError('InSync did not accept the appointment request.', {
+                  hint: 'Nothing was requested, or the save flow changed; see docs/INSYNC-API.md.',
+                });
+              }
+              return {
+                requested: true,
+                requestId: result.PPARID,
+                ...summary,
+                note: 'The practice still has to confirm this request. Check insync_list_appointments.',
+              };
+            },
+            'appointment request',
+            'insync_list_appointments',
+          );
+        },
+        render: compactResult,
       }),
-      async plan(args) {
-        const s = await loadSchedule(client, {
-          date: args.date,
-          facilityId: args.facility_id,
-          providerId: args.provider_id,
-          visitTypeId: args.visit_type_id,
-        });
-        // loadSchedule throws for an explicit provider it cannot find.
-        const provider = s.provider as Record<string, unknown>;
-        const visitType =
-          args.visit_type_id === undefined
-            ? undefined
-            : s.visitTypes.find((v) => sameId(v.EncounterTypeID, args.visit_type_id));
-        if (args.visit_type_id !== undefined && visitType === undefined) {
-          throw new McpToolError(`Visit type ${args.visit_type_id} is not offered by this provider.`, {
-            hint: 'Use a visit type id from insync_find_appointment_slots.',
-          });
-        }
-        if (visitType === undefined && s.visitTypeMandatory) {
-          throw new McpToolError('This practice requires a visit type on appointment requests.', {
-            hint: 'Pass visit_type_id from insync_find_appointment_slots.',
-          });
-        }
-        const slot = openSlots(s.slots).find((x) => x.Time === args.time);
-        if (slot === undefined) {
-          throw new McpToolError(`${args.time} on ${args.date} is not an open slot for that provider.`, {
-            hint: 'Pick a time insync_find_appointment_slots lists for the same date and provider.',
-          });
-        }
-        const body = buildAppointmentRequest({
-          facilityId: String(s.facility.FacilityId),
-          provider,
-          date: isoToMdy(args.date),
-          slot,
-          visitTypeId: visitType?.EncounterTypeID ?? '',
-          comments: args.comments ?? '',
-          telemedicine: args.telemedicine === true,
-        });
-        const summary = {
-          date: args.date,
-          time: args.time,
-          provider: provider.ProviderName,
-          facility: s.facility.FacilityName,
-          visitType: visitType?.EncounterType,
-        };
-        return {
-          gate: {
-            action: 'insync.request_appointment',
-            summary: `Request an appointment with ${String(provider.ProviderName)} on ${args.date} at ${args.time}`,
-            account: undefined,
-            request: { method: 'POST', path: 'PatientScheduler/SaveAppointmentReq', body },
-            willSend: tidy({ ...summary, comments: args.comments, telemedicine: args.telemedicine === true }),
-            preview: { note: 'This is a request; the practice confirms or declines it.' },
-          },
-          state: { body, summary },
-        };
-      },
-      async execute({ body, summary }) {
-        return sendOnce(
-          async () => {
-            const data = await client.submitJson('PatientScheduler/SaveAppointmentReq', body);
-            const result = asRecord(data.resultModel);
-            const status = Number(result.Status);
-            if (status === 2) {
-              throw new McpToolError('That slot is already booked.', {
-                hint: 'Nothing was requested. Pick another slot with insync_find_appointment_slots.',
-              });
-            }
-            if (status === 4) {
-              throw new McpToolError(`The practice declined the request: ${String(result.ResponseMsg)}`, {
-                hint: 'Nothing was requested.',
-              });
-            }
-            if (status !== 1) {
-              throw new McpToolError('InSync did not accept the appointment request.', {
-                hint: 'Nothing was requested, or the save flow changed; see docs/INSYNC-API.md.',
-              });
-            }
-            return {
-              requested: true,
-              requestId: result.PPARID,
-              ...summary,
-              note: 'The practice still has to confirm this request. Check insync_list_appointments.',
-            };
-          },
-          'appointment request',
-          'insync_list_appointments',
-        );
-      },
-      render: compactResult,
-    }),
+    ),
   );
 
-  registerWrite(
-    server,
-    defineWrite({
-      name: 'insync_cancel_appointment',
-      description: writeDescription(
-        'Ask the practice to cancel an upcoming appointment (visit id from ' +
-          'insync_list_appointments), with a reason. This sends a cancellation REQUEST the ' +
-          'practice reviews; it cannot be withdrawn through this server. Refused when the ' +
-          'practice’s cancellation period has passed.',
-      ),
-      annotations: WRITE,
-      inputSchema: z.object({
-        visit_id: NumericIdString.describe('The visit id, from insync_list_appointments.'),
-        reason: NonEmptyString.max(500).describe('Reason for cancelling (the portal requires one).'),
-      }),
-      async plan({ visit_id, reason }) {
-        const upcoming = asRecord(await client.listAppointments('upcoming', { pageSize: 100 }));
-        const current = asRecord(upcoming.currentAppointment);
-        const rows = asRecordArray(current.Appointment);
-        const visit = rows.find((a) => sameId(a.VisitID, visit_id));
-        // One page of 100 is read. When the portal says there are more and the
-        // visit was not on that page, "not upcoming" would be a guess — say what
-        // was actually checked instead. No numeric TotalRows: the page is the list.
-        const total = Number(current.TotalRows);
-        if (visit === undefined && Number.isFinite(total) && total > rows.length) {
-          throw new McpToolError(
-            `Could not find visit ${visit_id}: you have ${total} upcoming appointments and only ` +
-              `${rows.length} were checked.`,
-            {
-              hint:
-                'Check the visit id against insync_list_appointments (upcoming), or cancel it in ' +
-                'the portal. (This server does not page through the rest of the list.)',
+  withToolMeta(server, healthMeta('change', { aliases: ['cancel my appointment', 'cancel therapy'] }), () =>
+    registerWrite(
+      server,
+      defineWrite({
+        name: 'insync_cancel_appointment',
+        description: writeDescription(
+          'Ask the practice to cancel an upcoming appointment (visit id from ' +
+            'insync_list_appointments), with a reason. This sends a cancellation REQUEST the ' +
+            'practice reviews; it cannot be withdrawn through this server. Refused when the ' +
+            'practice’s cancellation period has passed.',
+        ),
+        annotations: WRITE,
+        inputSchema: z.object({
+          visit_id: NumericIdString.describe('The visit id, from insync_list_appointments.'),
+          reason: NonEmptyString.max(500).describe('Reason for cancelling (the portal requires one).'),
+        }),
+        async plan({ visit_id, reason }) {
+          const upcoming = asRecord(await client.listAppointments('upcoming', { pageSize: 100 }));
+          const current = asRecord(upcoming.currentAppointment);
+          const rows = asRecordArray(current.Appointment);
+          const visit = rows.find((a) => sameId(a.VisitID, visit_id));
+          // One page of 100 is read. When the portal says there are more and the
+          // visit was not on that page, "not upcoming" would be a guess — say what
+          // was actually checked instead. No numeric TotalRows: the page is the list.
+          const total = Number(current.TotalRows);
+          if (visit === undefined && Number.isFinite(total) && total > rows.length) {
+            throw new McpToolError(
+              `Could not find visit ${visit_id}: you have ${total} upcoming appointments and only ` +
+                `${rows.length} were checked.`,
+              {
+                hint:
+                  'Check the visit id against insync_list_appointments (upcoming), or cancel it in ' +
+                  'the portal. (This server does not page through the rest of the list.)',
+              },
+            );
+          }
+          if (visit === undefined) {
+            throw new McpToolError(`Visit ${visit_id} is not one of your upcoming appointments.`, {
+              hint: 'Use a visit id from insync_list_appointments (upcoming).',
+            });
+          }
+          if (Number(visit.IsNotCancel) === 1) {
+            throw new McpToolError('The practice marks this appointment as one that cannot be cancelled online.', {
+              hint: 'Contact the practice directly, or send a message (insync_send_message).',
+            });
+          }
+          if ((await client.checkCancelWindow(visit_id)) === '2') {
+            throw new McpToolError('The cancellation period for this appointment has passed.', {
+              hint: 'The portal will not take a cancellation now. Contact the practice directly.',
+            });
+          }
+          const form = {
+            VisitID: visit_id,
+            PPARID: String(visit.PPARID ?? 0),
+            Comments: reason.trim(),
+            caseID: '3',
+          };
+          const shown = tidy({
+            date: visit.VisitDate,
+            time: visit.StartTime,
+            provider: visit.Provider,
+            type: visit.VisitType,
+            status: visit.VisitStatus,
+          });
+          return {
+            gate: {
+              action: 'insync.cancel_appointment',
+              summary: `Ask the practice to cancel your ${String(visit.VisitDate)} appointment`,
+              account: undefined,
+              target: visit_id,
+              request: { method: 'POST', path: 'Appointment/SaveCancelAppointmentRequest', body: form },
+              willSend: { appointment: shown, reason: form.Comments },
             },
+            state: { form, shown },
+          };
+        },
+        async execute({ form, shown }) {
+          return sendOnce(
+            async () => {
+              await client.submitForm('Appointment/SaveCancelAppointmentRequest', form);
+              return {
+                cancellationRequested: true,
+                visitId: form.VisitID,
+                appointment: shown,
+                note: 'The practice reviews cancellation requests. Check insync_list_appointments.',
+              };
+            },
+            'cancellation request',
+            'insync_list_appointments',
           );
-        }
-        if (visit === undefined) {
-          throw new McpToolError(`Visit ${visit_id} is not one of your upcoming appointments.`, {
-            hint: 'Use a visit id from insync_list_appointments (upcoming).',
-          });
-        }
-        if (Number(visit.IsNotCancel) === 1) {
-          throw new McpToolError('The practice marks this appointment as one that cannot be cancelled online.', {
-            hint: 'Contact the practice directly, or send a message (insync_send_message).',
-          });
-        }
-        if ((await client.checkCancelWindow(visit_id)) === '2') {
-          throw new McpToolError('The cancellation period for this appointment has passed.', {
-            hint: 'The portal will not take a cancellation now. Contact the practice directly.',
-          });
-        }
-        const form = {
-          VisitID: visit_id,
-          PPARID: String(visit.PPARID ?? 0),
-          Comments: reason.trim(),
-          caseID: '3',
-        };
-        const shown = tidy({
-          date: visit.VisitDate,
-          time: visit.StartTime,
-          provider: visit.Provider,
-          type: visit.VisitType,
-          status: visit.VisitStatus,
-        });
-        return {
-          gate: {
-            action: 'insync.cancel_appointment',
-            summary: `Ask the practice to cancel your ${String(visit.VisitDate)} appointment`,
-            account: undefined,
-            target: visit_id,
-            request: { method: 'POST', path: 'Appointment/SaveCancelAppointmentRequest', body: form },
-            willSend: { appointment: shown, reason: form.Comments },
-          },
-          state: { form, shown },
-        };
-      },
-      async execute({ form, shown }) {
-        return sendOnce(
-          async () => {
-            await client.submitForm('Appointment/SaveCancelAppointmentRequest', form);
-            return {
-              cancellationRequested: true,
-              visitId: form.VisitID,
-              appointment: shown,
-              note: 'The practice reviews cancellation requests. Check insync_list_appointments.',
-            };
-          },
-          'cancellation request',
-          'insync_list_appointments',
-        );
-      },
-      render: compactResult,
-    }),
+        },
+        render: compactResult,
+      }),
+    ),
   );
 }
