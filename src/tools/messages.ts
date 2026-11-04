@@ -14,9 +14,9 @@ import {
   untrustedViewResponse,
 } from '../view.js';
 import { healthMeta } from './hints.js';
+import { WRITE } from './_writes.js';
 
 const LIST_VIEWS = [...ASSEMBLED_VIEWS, 'brief'] as const;
-import { WRITE } from './_writes.js';
 
 const WROTE_SUBJECTS = 'Message subjects and senders are written by your practice.';
 const WROTE_BODY = 'This message was written by your practice.';
