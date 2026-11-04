@@ -206,6 +206,26 @@ describe('brief helpers', () => {
     expect(briefLine('A', 'no date', '')).toBe('A — no date — unknown');
     expect(briefLine('A', 'no date', '!!')).toBe('A — no date — unknown');
   });
+
+  it('briefLine cuts the WHOLE line to 120 chars, title first, even when the status alone would overflow', () => {
+    const status = 'awaiting '.repeat(30);
+    const line = briefLine('Intake packet', '2026-11-03', status);
+    expect(line.length).toBeLessThanOrEqual(120);
+    expect(line.startsWith('Intake packet — 2026-11-03 — awaiting')).toBe(true);
+    const both = briefLine('t'.repeat(300), '2026-11-03T10:00', status);
+    expect(both.length).toBeLessThanOrEqual(120);
+    expect(both).toContain(' — 2026-11-03T10:00 — awaiting');
+    expect(both.startsWith('t')).toBe(true);
+  });
+
+  it('briefLine escapes a title that starts with "-- " or "\\" with one leading backslash', () => {
+    expect(briefLine('-- none', 'no date', 'sent')).toBe('\\-- none — no date — sent');
+    expect(briefLine('\\share', 'no date', 'sent')).toBe('\\\\share — no date — sent');
+    expect(briefLine('--none', 'no date', 'sent')).toBe('--none — no date — sent');
+    const long = briefLine(`-- ${'x'.repeat(300)}`, 'no date', 'sent');
+    expect(long.startsWith('\\-- x')).toBe(true);
+    expect(long.length).toBeLessThanOrEqual(120);
+  });
 });
 
 describe('briefNotes', () => {
@@ -320,6 +340,13 @@ describe('insync_list_messages view brief', () => {
     );
     expectBriefLines(env);
     expect(env.data).toEqual(['Your appointment reminder (from Example Clinic) — 2026-10-20T09:00 — unread']);
+  });
+
+  it('escapes a subject that would read as a note line', async () => {
+    const env = await brief(registerMessageTools, 'insync_list_messages', {}, () =>
+      okJson({ recordsTotal: 1, data: [{ ...MESSAGE, TaskSubject: '-- none' }] }),
+    );
+    expect(env.data).toEqual(['\\-- none (from Example Clinic) — 2026-10-20T09:00 — unread']);
   });
 
   it('names the recipient on a sent message, and copes with a missing subject', async () => {

@@ -89,7 +89,9 @@ the group's canonical reads are:
 
 Each answers `view: "brief"` inside the untrusted-data envelope (`data` is the
 line list, because the text is the practice's), ending in `-- none` when empty
-or `-- N of M shown` / `-- more` when a page is partial. There is no subject
+or `-- N of M shown` / `-- more` when a page is partial. Each line is at most
+120 characters, cut as a whole with the title shortened first, and a title that
+starts with `-- ` or `\` gets one leading `\` so it never reads as a note. There is no subject
 argument: one portal login is one patient. A compound ask such as "any therapy
 appointments this week, and anything due at the doctor?" fans out to the
 appointments and forms reads alongside the group's other members. When the
