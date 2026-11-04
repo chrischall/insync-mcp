@@ -4,6 +4,7 @@ import { parse } from 'node-html-parser';
 import type { InsyncClient, MedicationStatus } from '../client.js';
 import { READ, asRecord, asRecordArray, cleanCellText, tidy } from './_shared.js';
 import { assembledViewArg, assembledViewResponse, viewArg, viewResponse } from '../view.js';
+import { healthMeta } from './hints.js';
 
 /**
  * Parse the refill-history grid HTML into rows. Column headers (when the grid
@@ -36,6 +37,7 @@ export function registerClinicalTools(server: McpServer, client: InsyncClient): 
   server.registerTool(
     'insync_list_medications',
     {
+      _meta: healthMeta('lookup', { aliases: ['medications', 'meds', 'prescriptions'] }),
       description:
         'List prescriptions / medications on file — drug name, dispense, quantity, ' +
         'refills remaining, days supply, prescription date and prescriber. Choose current, ' +
@@ -76,6 +78,7 @@ export function registerClinicalTools(server: McpServer, client: InsyncClient): 
   server.registerTool(
     'insync_list_allergies',
     {
+      _meta: healthMeta('lookup', { aliases: ['allergies'] }),
       description: 'List the patient’s recorded allergies and their reactions.',
       annotations: READ,
       inputSchema: z.object({ view: viewArg() }),
@@ -93,6 +96,7 @@ export function registerClinicalTools(server: McpServer, client: InsyncClient): 
   server.registerTool(
     'insync_list_refill_requests',
     {
+      _meta: healthMeta('lookup', { aliases: ['refill status', 'refill requests'] }),
       description:
         'List the patient’s prescription refill-request history — the rows of the ' +
         'refill grid (status and dates per request). Does NOT submit a refill request.',

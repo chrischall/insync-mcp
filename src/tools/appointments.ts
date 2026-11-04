@@ -3,7 +3,32 @@ import { IsoDate, todayIso } from '@chrischall/mcp-utils';
 import type { McpServer } from '@modelcontextprotocol/server';
 import type { InsyncClient } from '../client.js';
 import { READ, asRecord, asRecordArray, tidy } from './_shared.js';
-import { viewArg, viewResponse } from '../view.js';
+import { healthMeta } from './hints.js';
+import {
+  PASSTHROUGH_VIEWS,
+  briefLine,
+  briefNotes,
+  mdyToIso,
+  untrustedBriefResponse,
+  viewArg,
+  viewResponse,
+} from '../view.js';
+
+const LIST_VIEWS = [...PASSTHROUGH_VIEWS, 'brief'] as const;
+
+/**
+ * One visit as `<type> with <provider> at <facility> — <ISO start> — <status>`,
+ * at most 120 characters.
+ */
+export function appointmentBrief(a: Record<string, unknown>): string {
+  const text = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined);
+  const parts = [text(a.VisitType) ?? 'Appointment'];
+  const provider = text(a.Provider);
+  if (provider !== undefined) parts.push(`with ${provider}`);
+  const facility = text(a.FacilityName);
+  if (facility !== undefined) parts.push(`at ${facility}`);
+  return briefLine(parts.join(' '), mdyToIso(a.VisitDate, a.StartTime), text(a.VisitStatus) ?? 'scheduled');
+}
 
 /** ISO `YYYY-MM-DD` → the portal's `MM/DD/YYYY`. The schema has already validated it as a real calendar date. */
 export function isoToMdy(iso: string): string {
@@ -27,6 +52,10 @@ export function registerAppointmentTools(server: McpServer, client: InsyncClient
         'time, provider, facility, visit type, status and expected copay. Covers therapy, ' +
         'psychiatry and any other scheduled visit.',
       annotations: READ,
+      _meta: healthMeta('whats-on', {
+        canonical: true,
+        aliases: ['therapy', 'therapist', 'psychiatrist', 'counseling', 'session', 'appointment', 'visit'],
+      }),
       inputSchema: z.object({
         when: z
           .enum(['upcoming', 'past'])
@@ -40,11 +69,24 @@ export function registerAppointmentTools(server: McpServer, client: InsyncClient
           .max(100)
           .default(20)
           .describe('Appointments per page (1–100). Default 20.'),
-        view: viewArg(),
+        view: z
+          .enum(LIST_VIEWS)
+          .optional()
+          .describe(
+            'compact (default) projects each record to the fields a caller acts on; "full" keeps every ' +
+              'field this server understands; "raw" returns the portal payload untouched; "brief" returns ' +
+              'one line per visit: <type> with <provider> at <facility> — <ISO start> — <status>.',
+          ),
       }),
     },
     async ({ when, page, page_size, view }) => {
       const raw = await client.listAppointments(when, { pageSize: page_size, currentPage: page });
+      if (view === 'brief') {
+        const current = asRecord(asRecord(raw).currentAppointment);
+        const visits = asRecordArray(current.Appointment);
+        const lines = [...visits.map(appointmentBrief), ...briefNotes(visits.length, current.TotalRows, page_size)];
+        return untrustedBriefResponse(lines, 'Visit types, provider and facility names are written by your practice.');
+      }
       return viewResponse(view, raw, (data) => {
         const current = asRecord(asRecord(data).currentAppointment);
         if (!Array.isArray(current.Appointment)) return undefined;
@@ -75,6 +117,7 @@ export function registerAppointmentTools(server: McpServer, client: InsyncClient
         'Get the monthly appointment calendar — the day, time slot and label of each ' +
         'scheduled visit in a date range. Defaults to the current month when no range is given.',
       annotations: READ,
+      _meta: healthMeta('whats-on'),
       inputSchema: z.object({
         from: IsoDate.optional().describe(
           'Range start (ISO YYYY-MM-DD). Defaults to the first day of the current month.',

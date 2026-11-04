@@ -77,3 +77,60 @@ export function untrustedViewResponse(opts: {
       : opts.data;
   return viewResult(rung, untrustedEnvelope(payload, { note: `${opts.whoWrote} ${UNTRUSTED_CONTENT_RULE}` }));
 }
+
+// ── view "brief" (the mcp-host context-groups contract) ─────────────────────
+//
+// A canonical read answers one line per item, at most 120 chars:
+// `title — <ISO date | no date> — <status>`. The lines carry practice-authored
+// text, so they go inside the untrusted-data envelope as `data: string[]`. A
+// line starting with `-- ` is a NOTE, not an item: `-- none` for an empty
+// result, `-- N of M shown` / `-- more` for a partial page.
+
+const BRIEF_MAX = 120;
+
+/** One brief line; the title is shortened so the whole line fits in 120 chars. */
+export function briefLine(title: string, date: string, status: string): string {
+  const tidyStatus = status.toLowerCase().replace(/[^a-z ]+/g, ' ').replace(/\s+/g, ' ').trim() || 'unknown';
+  const tail = ` — ${date} — ${tidyStatus}`;
+  const room = BRIEF_MAX - tail.length;
+  const shown = title.length > room ? `${title.slice(0, Math.max(room - 1, 0))}…` : title;
+  return `${shown}${tail}`;
+}
+
+const MDY = /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(.*))?$/;
+const HM = /^(\d{1,2}):(\d{2})\s*([AP]M)$/i;
+
+/**
+ * The portal's `MM/DD/YYYY` (optionally with a `hh:mm AM` time, inline or as
+ * `time`) as an ISO date or `YYYY-MM-DDTHH:MM` local time; anything else is
+ * `no date`.
+ */
+export function mdyToIso(text: unknown, time?: unknown): string {
+  const m = typeof text === 'string' ? MDY.exec(text.trim()) : null;
+  if (m === null) return 'no date';
+  const date = `${m[3]}-${m[1]!.padStart(2, '0')}-${m[2]!.padStart(2, '0')}`;
+  const t = HM.exec(typeof time === 'string' ? time.trim() : (m[4] ?? '').trim());
+  if (t === null) return date;
+  const hour = (Number(t[1]) % 12) + (t[3]!.toUpperCase() === 'PM' ? 12 : 0);
+  return `${date}T${String(hour).padStart(2, '0')}:${t[2]}`;
+}
+
+/**
+ * The note lines a brief answer ends with: `-- none` when there are no items,
+ * `-- N of M shown` when the portal's total says more exist, `-- more` when the
+ * total is unknown but the page came back full.
+ */
+export function briefNotes(shown: number, total: unknown, pageSize: number): string[] {
+  if (shown === 0) return ['-- none'];
+  const all = Number(total);
+  if (total !== undefined && total !== null && total !== '' && Number.isFinite(all)) {
+    return all > shown ? [`-- ${shown} of ${all} shown`] : [];
+  }
+  return shown >= pageSize ? ['-- more'] : [];
+}
+
+/** Answer brief lines inside the untrusted-data envelope, minified. */
+export function untrustedBriefResponse(lines: string[], whoWrote: string): CallToolResult {
+  const payload = untrustedEnvelope(lines, { note: `${whoWrote} ${UNTRUSTED_CONTENT_RULE}` });
+  return { content: [{ type: 'text', text: JSON.stringify(payload) }] };
+}

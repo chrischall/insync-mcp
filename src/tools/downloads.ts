@@ -12,6 +12,7 @@ import type { InsyncClient } from '../client.js';
 import type { DownloadIO, DownloadOutcome } from '../download-io.js';
 import { READ, asRecordArray, tidy } from './_shared.js';
 import { ASSEMBLED_VIEWS, assembledViewArg, untrustedViewResponse } from '../view.js';
+import { healthMeta } from './hints.js';
 
 /** A portal file name may be `display##_##exercise-url`; keep only the display half. */
 export function splitAttachmentName(raw: unknown): { fileName: string; exerciseUrl?: string } {
@@ -57,6 +58,7 @@ export function registerDownloadTools(
   server.registerTool(
     'insync_list_attachments',
     {
+      _meta: healthMeta('lookup'),
       description:
         'List the files attached to a secure message, by the message’s master id (from ' +
         'insync_list_messages). Returns each attachment’s name and position; use ' +
@@ -90,6 +92,7 @@ export function registerDownloadTools(
   server.registerTool(
     'insync_download_attachment',
     {
+      _meta: healthMeta('other'),
       description:
         'Download one file attached to a secure message. Identify it by the message’s master id ' +
         'and the attachment’s position (index) from insync_list_attachments. On a local install ' +
@@ -153,6 +156,7 @@ export function registerDownloadTools(
   server.registerTool(
     'insync_download_document',
     {
+      _meta: healthMeta('other'),
       description:
         'Download a document filed to the patient’s portal account. Identify it by the ' +
         'folder_url and file_name from insync_list_documents (full view). On a local install the ' +

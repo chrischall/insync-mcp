@@ -35,6 +35,7 @@ import {
 import type { McpServer } from '@modelcontextprotocol/server';
 import type { InsyncClient } from '../client.js';
 import { WRITE, compactResult, sendOnce, writeDescription } from './_writes.js';
+import { healthMeta, withToolMeta } from './hints.js';
 
 /** The image types the portal accepts, lower-case extension → the MIME it is sent as. */
 export const UPLOAD_MIME_BY_EXT: Readonly<Record<string, string>> = {
@@ -112,99 +113,101 @@ export function registerUploadTools(
   const allowedRoots = opts.allowedRoots;
   const maxBytes = opts.maxBytes ?? MAX_UPLOAD_BYTES;
 
-  registerWrite(
-    server,
-    defineWrite({
-      name: 'insync_upload_insurance_card',
-      description: writeDescription(
-        'Upload a photo of your insurance card (front, back, or both) to your own InSync ' +
-          'patient profile, from a local image file (JPG, JPEG or PNG). This WRITES to the portal: ' +
-          'the practice sees the uploaded image and there is no delete or undo through this server, ' +
-          'so it is irreversible.',
-      ),
-      annotations: WRITE,
-      inputSchema: z.object({
-        side: z
-          .enum(['front', 'back', 'both'])
-          .describe('Which side(s) to upload: front, back, or both.'),
-        front_path: z
-          .string()
-          .optional()
-          .describe('Local path to the FRONT image (JPG/JPEG/PNG). Required for side front or both.'),
-        back_path: z
-          .string()
-          .optional()
-          .describe('Local path to the BACK image (JPG/JPEG/PNG). Required for side back or both.'),
-      }),
-      async plan({ side, front_path, back_path }) {
-        const want = sidesFor(side);
-        if (want.front && (front_path === undefined || front_path === '')) {
-          throw new McpToolError('front_path is required to upload the front of the card.', {
-            hint: 'Pass front_path (a local JPG/JPEG/PNG), or use side="back" to upload only the back.',
-          });
-        }
-        if (want.back && (back_path === undefined || back_path === '')) {
-          throw new McpToolError('back_path is required to upload the back of the card.', {
-            hint: 'Pass back_path (a local JPG/JPEG/PNG), or use side="front" to upload only the front.',
-          });
-        }
+  withToolMeta(server, healthMeta('send', { aliases: ['insurance card', 'upload my insurance'] }), () =>
+    registerWrite(
+      server,
+      defineWrite({
+        name: 'insync_upload_insurance_card',
+        description: writeDescription(
+          'Upload a photo of your insurance card (front, back, or both) to your own InSync ' +
+            'patient profile, from a local image file (JPG, JPEG or PNG). This WRITES to the portal: ' +
+            'the practice sees the uploaded image and there is no delete or undo through this server, ' +
+            'so it is irreversible.',
+        ),
+        annotations: WRITE,
+        inputSchema: z.object({
+          side: z
+            .enum(['front', 'back', 'both'])
+            .describe('Which side(s) to upload: front, back, or both.'),
+          front_path: z
+            .string()
+            .optional()
+            .describe('Local path to the FRONT image (JPG/JPEG/PNG). Required for side front or both.'),
+          back_path: z
+            .string()
+            .optional()
+            .describe('Local path to the BACK image (JPG/JPEG/PNG). Required for side back or both.'),
+        }),
+        async plan({ side, front_path, back_path }) {
+          const want = sidesFor(side);
+          if (want.front && (front_path === undefined || front_path === '')) {
+            throw new McpToolError('front_path is required to upload the front of the card.', {
+              hint: 'Pass front_path (a local JPG/JPEG/PNG), or use side="back" to upload only the back.',
+            });
+          }
+          if (want.back && (back_path === undefined || back_path === '')) {
+            throw new McpToolError('back_path is required to upload the back of the card.', {
+              hint: 'Pass back_path (a local JPG/JPEG/PNG), or use side="front" to upload only the front.',
+            });
+          }
 
-        // Vet (and read) the files BEFORE anything is shown or sent. Planning
-        // only touches the local filesystem — no portal request is made.
-        const vet = (path: string): Promise<VettedUpload> =>
-          vetUploadFile(path, { mimeByExt: UPLOAD_MIME_BY_EXT, maxBytes, allowedRoots, readAll: true });
-        const front = want.front ? await vet(front_path as string) : undefined;
-        const back = want.back ? await vet(back_path as string) : undefined;
+          // Vet (and read) the files BEFORE anything is shown or sent. Planning
+          // only touches the local filesystem — no portal request is made.
+          const vet = (path: string): Promise<VettedUpload> =>
+            vetUploadFile(path, { mimeByExt: UPLOAD_MIME_BY_EXT, maxBytes, allowedRoots, readAll: true });
+          const front = want.front ? await vet(front_path as string) : undefined;
+          const back = want.back ? await vet(back_path as string) : undefined;
 
-        const body = buildInsuranceForm({ front: front?.bytes, back: back?.bytes });
-        const files = [
-          ...(front ? [{ side: 'front', name: front.requested, type: front.mime, size: front.size }] : []),
-          ...(back ? [{ side: 'back', name: back.requested, type: back.mime, size: back.size }] : []),
-        ];
+          const body = buildInsuranceForm({ front: front?.bytes, back: back?.bytes });
+          const files = [
+            ...(front ? [{ side: 'front', name: front.requested, type: front.mime, size: front.size }] : []),
+            ...(back ? [{ side: 'back', name: back.requested, type: back.mime, size: back.size }] : []),
+          ];
 
-        // `plan` runs on EVERY call, so the gate is rebuilt from the current
-        // arguments and files. registerWrite hands the whole gate to
-        // confirmWrite: the exact bytes (request.body) AND the shown preview are
-        // bound into the token, so a file or argument that changed since the
-        // preview is refused as DRAFT_CHANGED. `willSend` keeps the base64 out
-        // of the preview the user reads, while the real body stays bound. The
-        // anti-forgery token is NOT bound — client.upload mints a fresh one for
-        // whichever session is live.
-        const label = side === 'both' ? 'front and back' : side;
-        return {
-          gate: {
-            action: 'insync.upload_insurance_card',
-            summary: `Upload your insurance card (${label}) to your InSync profile`,
-            account: undefined,
-            target: side,
-            request: { method: 'POST', path: 'PatientProfile/SaveInsuranceCardImages', body },
-            willSend: { files },
-            preview: {
-              warning:
-                'This uploads to your InSync profile; the practice can see it and this server cannot ' +
-                'remove it.',
+          // `plan` runs on EVERY call, so the gate is rebuilt from the current
+          // arguments and files. registerWrite hands the whole gate to
+          // confirmWrite: the exact bytes (request.body) AND the shown preview are
+          // bound into the token, so a file or argument that changed since the
+          // preview is refused as DRAFT_CHANGED. `willSend` keeps the base64 out
+          // of the preview the user reads, while the real body stays bound. The
+          // anti-forgery token is NOT bound — client.upload mints a fresh one for
+          // whichever session is live.
+          const label = side === 'both' ? 'front and back' : side;
+          return {
+            gate: {
+              action: 'insync.upload_insurance_card',
+              summary: `Upload your insurance card (${label}) to your InSync profile`,
+              account: undefined,
+              target: side,
+              request: { method: 'POST', path: 'PatientProfile/SaveInsuranceCardImages', body },
+              willSend: { files },
+              preview: {
+                warning:
+                  'This uploads to your InSync profile; the practice can see it and this server cannot ' +
+                  'remove it.',
+              },
             },
-          },
-          state: { body, files },
-        };
-      },
-      async execute({ body, files }) {
-        return sendOnce(
-          async () => {
-            const result = await client.upload('PatientProfile/SaveInsuranceCardImages', body);
-            return {
-              uploaded: files.map((f) => ({ side: f.side, name: f.name, size: f.size })),
-              status: result.status,
-              note:
-                'The image is now on your InSync profile and visible to the practice; this server ' +
-                'cannot remove it.',
-            };
-          },
-          'insurance-card upload',
-          'your InSync profile',
-        );
-      },
-      render: compactResult,
-    }),
+            state: { body, files },
+          };
+        },
+        async execute({ body, files }) {
+          return sendOnce(
+            async () => {
+              const result = await client.upload('PatientProfile/SaveInsuranceCardImages', body);
+              return {
+                uploaded: files.map((f) => ({ side: f.side, name: f.name, size: f.size })),
+                status: result.status,
+                note:
+                  'The image is now on your InSync profile and visible to the practice; this server ' +
+                  'cannot remove it.',
+              };
+            },
+            'insurance-card upload',
+            'your InSync profile',
+          );
+        },
+        render: compactResult,
+      }),
+    ),
   );
 }

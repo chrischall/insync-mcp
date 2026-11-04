@@ -4,11 +4,34 @@ import { htmlToReadableText } from '@chrischall/mcp-utils/html';
 import type { McpServer } from '@modelcontextprotocol/server';
 import type { InsyncClient, MessageFolder } from '../client.js';
 import { READ, asRecord, asRecordArray, tidy } from './_shared.js';
-import { ASSEMBLED_VIEWS, assembledViewArg, untrustedViewResponse } from '../view.js';
+import {
+  ASSEMBLED_VIEWS,
+  assembledViewArg,
+  briefLine,
+  briefNotes,
+  mdyToIso,
+  untrustedBriefResponse,
+  untrustedViewResponse,
+} from '../view.js';
+import { healthMeta } from './hints.js';
+
+const LIST_VIEWS = [...ASSEMBLED_VIEWS, 'brief'] as const;
 import { WRITE } from './_writes.js';
 
 const WROTE_SUBJECTS = 'Message subjects and senders are written by your practice.';
 const WROTE_BODY = 'This message was written by your practice.';
+
+/**
+ * One message-list row as `<subject> (from <sender> | to <recipient>) — <ISO
+ * date> — <folder>`, at most 120 characters.
+ */
+export function messageBrief(row: Record<string, unknown>, folder: string): string {
+  const text = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined);
+  const subject = text(row.TaskSubject) ?? 'Message';
+  const party = row.IsFromPatient === true ? text(row.ToGroupName) : text(row.GroupName);
+  const title = party === undefined ? subject : `${subject} (${row.IsFromPatient === true ? 'to' : 'from'} ${party})`;
+  return briefLine(title, mdyToIso(row.ReminderDateText), folder);
+}
 
 /** One message-list row reduced to the fields a caller acts on. */
 function projectMessageRow(row: Record<string, unknown>): Record<string, unknown> {
@@ -34,6 +57,10 @@ export function registerMessageTools(server: McpServer, client: InsyncClient): v
         'recipient, subject, date, attachment count and the ids insync_get_message needs. ' +
         'Listing does NOT mark anything read.',
       annotations: READ,
+      _meta: healthMeta('whats-new', {
+        canonical: true,
+        aliases: ['messages', 'portal messages', 'message from the practice', 'therapist message', 'doctor message'],
+      }),
       inputSchema: z.object({
         folder: z
           .enum(['unread', 'read', 'sent'])
@@ -53,7 +80,14 @@ export function registerMessageTools(server: McpServer, client: InsyncClient): v
           .max(100)
           .default(25)
           .describe('Messages per page (1–100). Default 25.'),
-        view: assembledViewArg(),
+        view: z
+          .enum(LIST_VIEWS)
+          .optional()
+          .describe(
+            'compact (default) projects each record to the fields a caller acts on; "full" keeps every ' +
+              'field this server understands; "brief" returns one line per message: <subject> (from ' +
+              '<sender>) — <ISO date> — <folder>. (No "raw": the record is assembled here.)',
+          ),
       }),
     },
     async ({ folder, search, has_attachment, archived, page, page_size, view }) => {
@@ -65,6 +99,14 @@ export function registerMessageTools(server: McpServer, client: InsyncClient): v
         start: (page - 1) * page_size,
         length: page_size,
       });
+      if (view === 'brief') {
+        const rows = asRecordArray(asRecord(raw).data);
+        const lines = [
+          ...rows.map((r) => messageBrief(r, folder)),
+          ...briefNotes(rows.length, asRecord(raw).recordsTotal, page_size),
+        ];
+        return untrustedBriefResponse(lines, WROTE_SUBJECTS);
+      }
       return untrustedViewResponse({
         view,
         views: ASSEMBLED_VIEWS,
@@ -98,6 +140,7 @@ export function registerMessageTools(server: McpServer, client: InsyncClient): v
         'allow_mark_read is true; without it the tool returns the message’s metadata and a ' +
         'note asking you to confirm with the user first. An already-read message is opened freely.',
       annotations: WRITE,
+      _meta: healthMeta('lookup'),
       inputSchema: z.object({
         child_id: z.string().min(1).describe('TODOChildId of the message, from insync_list_messages.'),
         master_id: z
