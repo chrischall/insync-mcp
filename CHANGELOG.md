@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.0](https://github.com/chrischall/insync-mcp/compare/v0.2.2...v0.3.0) (2026-11-04)
+
+
+### Features
+
+* context-group hints ([#13](https://github.com/chrischall/insync-mcp/issues/13)) ([a898d79](https://github.com/chrischall/insync-mcp/commit/a898d79fd3c6a4b4808701ad2b59e22586d2beea))
+
+
+### Bug Fixes
+
+* **brief:** align the brief view with the fleet contract ([#17](https://github.com/chrischall/insync-mcp/issues/17)) ([fcf42e7](https://github.com/chrischall/insync-mcp/commit/fcf42e7838018b9c1fcb6371fd5822fe5bd210c4))
+
 ## [0.2.2](https://github.com/chrischall/insync-mcp/compare/v0.2.1...v0.2.2) (2026-10-29)
 
 
