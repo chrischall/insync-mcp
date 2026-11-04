@@ -87,14 +87,26 @@ export function untrustedViewResponse(opts: {
 // result, `-- N of M shown` / `-- more` for a partial page.
 
 const BRIEF_MAX = 120;
+/** The shortest a title is cut to before the status gives way too. */
+const TITLE_FLOOR = 24;
 
-/** One brief line; the title is shortened so the whole line fits in 120 chars. */
-export function briefLine(title: string, date: string, status: string): string {
+const cut = (s: string, n: number): string => (s.length > n ? `${s.slice(0, Math.max(n - 1, 0))}…` : s);
+
+/**
+ * One brief line, cut to ≤ 120 chars as a WHOLE, title first: the title
+ * shortens until the line fits, and only once it is at its floor does the
+ * status give way too. A title starting with `-- ` or `\` is escaped with one
+ * leading `\`, so a practice-written subject can never read as a note (the
+ * gateway strips that one backslash after its note check).
+ */
+export function briefLine(rawTitle: string, date: string, status: string): string {
+  const title = rawTitle.startsWith('-- ') || rawTitle.startsWith('\\') ? `\\${rawTitle}` : rawTitle;
   const tidyStatus = status.toLowerCase().replace(/[^a-z ]+/g, ' ').replace(/\s+/g, ' ').trim() || 'unknown';
-  const tail = ` — ${date} — ${tidyStatus}`;
-  const room = BRIEF_MAX - tail.length;
-  const shown = title.length > room ? `${title.slice(0, Math.max(room - 1, 0))}…` : title;
-  return `${shown}${tail}`;
+  const sep = ` — ${date} — `;
+  const room = BRIEF_MAX - sep.length;
+  if (title.length + tidyStatus.length <= room) return `${title}${sep}${tidyStatus}`;
+  const shown = cut(title, Math.max(room - tidyStatus.length, Math.min(title.length, TITLE_FLOOR)));
+  return `${shown}${sep}${cut(tidyStatus, room - shown.length)}`;
 }
 
 const MDY = /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(.*))?$/;
