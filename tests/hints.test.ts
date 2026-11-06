@@ -54,6 +54,7 @@ const EXPECTED_INTENT: Record<string, string> = {
   insync_download_attachment: 'other',
   insync_download_document: 'other',
   insync_upload_insurance_card: 'send',
+  insync_upload_slots: 'other',
   insync_list_message_recipients: 'lookup',
   insync_send_message: 'send',
   insync_reply_message: 'send',

@@ -1,10 +1,27 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { InsyncClient } from '../src/client.js';
 import type { BinaryFetchResult, FetchResult } from '../src/transport.js';
 import type { DeliverArgs, DownloadIO, DownloadOutcome } from '../src/download-io.js';
-import { InlineDownloadIO } from '../src/download-io.js';
+import { DeliveryLadderIO, NodeDownloadIO } from '../src/download-io.js';
 import { registerDownloadTools, splitAttachmentName } from '../src/tools/downloads.js';
-import { FakeTransport, type FakeCall, type Handler, textOf } from './_tools.js';
+import { BLOB_BASE, FakeTransport, type FakeCall, type Handler, fakeBlobStore, textOf } from './_tools.js';
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+/** A disk outcome, as NodeDownloadIO reports one. */
+const onDisk = (a: DeliverArgs, savedTo: string): DownloadOutcome => ({
+  via: 'disk',
+  fileName: a.fileName,
+  mimeType: a.mimeType,
+  size: a.bytes.length,
+  content: [],
+  savedTo,
+});
 
 const PORTAL_FILE = 'https://pfbhintouch.insynchcs.com/DocumentManager/DownloadFile.ashx?f=1';
 
@@ -23,11 +40,8 @@ const okBin = (body: string, contentType?: string): BinaryFetchResult => ({
 /** A DownloadIO that records the last deliver() and returns a canned outcome. */
 class RecordingIO implements DownloadIO {
   last?: DeliverArgs;
-  constructor(
-    readonly persistsFiles: boolean,
-    private readonly outcome: (a: DeliverArgs) => DownloadOutcome,
-  ) {}
-  deliver(args: DeliverArgs): DownloadOutcome {
+  constructor(private readonly outcome: (a: DeliverArgs) => DownloadOutcome) {}
+  async deliver(args: DeliverArgs): Promise<DownloadOutcome> {
     this.last = args;
     return this.outcome(args);
   }
@@ -44,8 +58,7 @@ function setup(opts: {
   );
   const client = new InsyncClient({ transport });
   const io =
-    opts.io ??
-    new RecordingIO(true, (a) => ({ fileName: a.fileName, mimeType: a.mimeType, size: a.bytes.length, savedTo: `/out/${a.fileName}` }));
+    opts.io ?? new RecordingIO((a) => onDisk(a, `/out/${a.fileName}`));
   const handlers = new Map<string, Handler>();
   const server = {
     registerTool: (name: string, _def: unknown, fn: Handler) => handlers.set(name, fn),
@@ -109,7 +122,7 @@ describe('insync_download_attachment', () => {
   });
 
   it('returns the exercise-url display name for a ##_## attachment', async () => {
-    const io = new RecordingIO(true, (a) => ({ fileName: a.fileName, size: a.bytes.length, savedTo: `/out/${a.fileName}` }));
+    const io = new RecordingIO((a) => onDisk(a, `/out/${a.fileName}`));
     const { handlers } = setup({
       responder: () => okJson(ATTACHMENTS),
       binaryResponder: () => okBin('X'),
@@ -120,7 +133,7 @@ describe('insync_download_attachment', () => {
   });
 
   it('names a nameless attachment "attachment"', async () => {
-    const io = new RecordingIO(true, (a) => ({ fileName: a.fileName, size: a.bytes.length, savedTo: `/out/${a.fileName}` }));
+    const io = new RecordingIO((a) => onDisk(a, `/out/${a.fileName}`));
     const rows = [{ FileName: '##_##http://x/y', FilePath: PORTAL_FILE, FileNotExit: true }]; // empty display name
     const { handlers } = setup({
       responder: () => okJson(rows),
@@ -141,7 +154,7 @@ describe('insync_download_attachment', () => {
       { FileName: 'a.pdf', FilePath: '', FileNotExit: true },
       { FileName: 'a.pdf', FilePath: 42, FileNotExit: true },
     ]) {
-      const io = new RecordingIO(true, (a) => ({ fileName: a.fileName, size: a.bytes.length, savedTo: '/out/x' }));
+      const io = new RecordingIO((a) => onDisk(a, '/out/x'));
       const { handlers, transport } = setup({
         responder: () => okJson([row]),
         binaryResponder: () => okBin('<html>dashboard</html>'),
@@ -154,16 +167,63 @@ describe('insync_download_attachment', () => {
     }
   });
 
-  it('inlines the bytes as base64 on a hosted (non-persisting) server', async () => {
+  it('returns a small file inline as a content block on a hosted server', async () => {
+    const blob = fakeBlobStore();
     const { handlers } = setup({
       responder: () => okJson(ATTACHMENTS),
       binaryResponder: () => okBin('PDFBYTES', 'application/pdf'),
-      io: new InlineDownloadIO(),
+      io: new DeliveryLadderIO({ store: blob.store }),
     });
-    const res = await handlers.get('insync_download_attachment')!({ master_id: '9001', index: 0 });
+    const res = (await handlers.get('insync_download_attachment')!({ master_id: '9001', index: 0 })) as {
+      content: { type: string; resource?: { blob: string; mimeType: string } }[];
+    };
     const out = JSON.parse(textOf(res));
     expect(out.saved_to).toBeUndefined();
-    expect(Buffer.from(out.base64, 'base64').toString()).toBe('PDFBYTES');
+    expect(out.delivered_via).toBe('resource');
+    expect(out.base64).toBeUndefined();
+    const block = res.content[1]!;
+    expect(block.type).toBe('resource');
+    expect(block.resource!.mimeType).toBe('application/pdf');
+    expect(Buffer.from(block.resource!.blob, 'base64').toString()).toBe('PDFBYTES');
+    expect(blob.calls).toEqual([]);
+  });
+
+  it('hands back a signed download link for an over-cap file on a hosted server', async () => {
+    const blob = fakeBlobStore();
+    const { handlers } = setup({
+      responder: () => okJson(ATTACHMENTS),
+      binaryResponder: () => okBin('PDFBYTES', 'application/pdf'),
+      io: new DeliveryLadderIO({ store: blob.store, inlineMaxBytes: 4 }),
+    });
+    const res = (await handlers.get('insync_download_attachment')!({ master_id: '9001', index: 0 })) as {
+      content: unknown[];
+    };
+    const out = JSON.parse(textOf(res));
+    expect(out.delivered_via).toBe('link');
+    expect(out.url.startsWith(`${BLOB_BASE}/`)).toBe(true);
+    expect(out.expires_at).toMatch(/^\d{4}-/);
+    expect(out.note).toMatch(/too large to return inline/);
+    expect(out.link_note).toMatch(/only to the user/);
+    expect(res.content).toHaveLength(1);
+    expect(blob.calls.map((c) => c.method)).toEqual(['PUT']);
+  });
+
+  it('saves to disk on a local install (real NodeDownloadIO)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'insync-dl-tool-'));
+    try {
+      const { handlers } = setup({
+        responder: () => okJson(ATTACHMENTS),
+        binaryResponder: () => okBin('PDFBYTES', 'application/pdf'),
+        io: new NodeDownloadIO([dir]),
+      });
+      const res = await handlers.get('insync_download_attachment')!({ master_id: '9001', index: 0, output_dir: dir });
+      const out = JSON.parse(textOf(res));
+      expect(out.saved_to.startsWith(dir)).toBe(true);
+      expect(out.delivered_via).toBe('disk');
+      expect(readFileSync(out.saved_to, 'utf8')).toBe('PDFBYTES');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('errors when the index is out of range, fetching no bytes', async () => {
@@ -201,7 +261,7 @@ describe('insync_download_document', () => {
   }
 
   it('resolves the file source then downloads and delivers it', async () => {
-    const io = new RecordingIO(true, (a) => ({ fileName: a.fileName, mimeType: a.mimeType, size: a.bytes.length, savedTo: `/out/${a.fileName}` }));
+    const io = new RecordingIO((a) => onDisk(a, `/out/${a.fileName}`));
     const { handlers, transport } = setup({
       responder: docResponder({ Status: 'success', FilePath: '/srv/doc-123' }),
       binaryResponder: () => okBin('DOCBYTES', 'application/pdf'),
@@ -258,18 +318,31 @@ describe('insync_download_document', () => {
     expect(out.status).toBeUndefined();
   });
 
-  it('reports a too-large file instead of inlining it', async () => {
+  it('links an over-cap document on a hosted server instead of dead-ending', async () => {
+    const blob = fakeBlobStore();
     const { handlers } = setup({
       responder: docResponder({ Status: 'success', FilePath: '/srv/doc' }),
       binaryResponder: () => okBin('TOOBIG', 'application/pdf'),
-      io: new InlineDownloadIO(2),
+      io: new DeliveryLadderIO({ store: blob.store, inlineMaxBytes: 2 }),
     });
     const res = await handlers.get('insync_download_document')!({
       folder_url: 'folder/abc',
       file_name: 'big.pdf',
     });
     const out = JSON.parse(textOf(res));
-    expect(out.note).toMatch(/too large to return inline/);
+    expect(out.delivered_via).toBe('link');
+    expect(out.url).toContain('big.pdf');
     expect(out.base64).toBeUndefined();
+  });
+
+  it('refuses an over-cap document clearly when hosted with no blob store', async () => {
+    const { handlers } = setup({
+      responder: docResponder({ Status: 'success', FilePath: '/srv/doc' }),
+      binaryResponder: () => okBin('TOOBIG', 'application/pdf'),
+      io: new DeliveryLadderIO({ store: null, inlineMaxBytes: 2 }),
+    });
+    await expect(
+      handlers.get('insync_download_document')!({ folder_url: 'folder/abc', file_name: 'big.pdf' }),
+    ).rejects.toThrow(/inline limit/);
   });
 });

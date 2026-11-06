@@ -300,6 +300,10 @@ ScannerName          # "" from a plain upload
 The portal JS strips a leading `data:image/<type>;base64,` prefix
 (`FileReader.readAsDataURL` result) before sending; this server reads raw file
 bytes, so its base64 has no such prefix, and it strips one defensively anyway.
+Each side's bytes arrive by exactly one route — a local path, inline base64, or
+a blob key from `insync_upload_slots` (hosted) — via mcp-utils'
+`resolveUploadSource`, which checks the type is JPEG/PNG and that the bytes
+match it.
 Only `.jpg`, `.jpeg` and `.png` are accepted here (the portal UI also lists
 `.gif`; it is omitted because the magic-byte guard the upload runs does not sniff
 a type it would then send).
@@ -322,8 +326,10 @@ confirm-gate binding.
 **Confirm gate.** The tool is `readOnly:false, destructive:true` and gated by
 `confirmWrite`: the first call reads nothing, returns a preview + `confirmToken`,
 and only a repeat call with that token (after the user approves the preview)
-uploads. The exact image bytes and the shown preview are bound into the token, so
-a file or argument that changed since the preview is refused as `DRAFT_CHANGED`.
+uploads. The exact image bytes and the shown preview (with each side's SHA-256)
+are bound into the token, and every source is re-read on the confirmed call, so
+a file, blob or argument that changed since the preview is refused as
+`DRAFT_CHANGED`. A blob-store upload is deleted only after the portal accepts.
 The write goes out once and is never replayed on a lapsed session.
 
 **Verification-after-write** (for the later live test, documented not executed):

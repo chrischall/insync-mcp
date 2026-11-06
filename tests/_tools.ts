@@ -1,6 +1,8 @@
 // Shared test rig for the read tools: a FakeTransport that answers by path, and
 // a `capture` that registers a tool module on a stub server and hands back the
 // tool handlers plus the transport (to assert which calls were made).
+import { vi } from 'vitest';
+import { createBlobStore, mintUploadSlot, type BlobStore } from '@chrischall/mcp-utils/export';
 import { InsyncClient } from '../src/client.js';
 import type {
   BinaryFetchResult,
@@ -156,9 +158,71 @@ export const stubTransport: InsyncTransport = {
 
 /** A disk-persisting DownloadIO stub for registration-only tests. */
 export const stubDownloadIO: DownloadIO = {
-  persistsFiles: true,
-  deliver: (args) => ({ fileName: args.fileName, mimeType: args.mimeType, size: args.bytes.length }),
+  deliver: async (args) => ({
+    via: 'disk',
+    fileName: args.fileName,
+    mimeType: args.mimeType,
+    size: args.bytes.length,
+    content: [],
+  }),
 };
+
+/** The fake blob store's base URL (`MCP_BLOB_BASE_URL` shape). Synthetic. */
+export const BLOB_BASE = 'https://host.example/b/reg_0123456789abcdef01234567';
+
+/** One request the fake blob store saw. */
+export interface BlobCall {
+  method: string;
+  key: string;
+}
+
+/**
+ * A real mcp-utils blob store whose objects live in a map, behind a stubbed
+ * global fetch (restore with `vi.unstubAllGlobals()`). `putUpload` stands in
+ * for the caller's curl to an upload slot; `deleteStatus` makes DELETE fail.
+ */
+export function fakeBlobStore(opts: { deleteStatus?: number } = {}): {
+  store: BlobStore;
+  objects: Map<string, { bytes: Uint8Array; type: string }>;
+  calls: BlobCall[];
+  putUpload: (filename: string, bytes: Uint8Array) => string;
+} {
+  const objects = new Map<string, { bytes: Uint8Array; type: string }>();
+  const calls: BlobCall[] = [];
+  const prefix = new URL(BLOB_BASE).pathname + '/';
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: string | URL, init?: RequestInit) => {
+      const key = decodeURIComponent(new URL(String(input)).pathname.slice(prefix.length));
+      const method = init?.method ?? 'GET';
+      calls.push({ method, key });
+      if (method === 'PUT') {
+        const headers = (init?.headers ?? {}) as Record<string, string>;
+        objects.set(key, {
+          bytes: new Uint8Array(init!.body as ArrayBuffer),
+          type: headers['content-type'] ?? 'application/octet-stream',
+        });
+        return new Response(null, { status: 200 });
+      }
+      if (method === 'DELETE') {
+        if (opts.deleteStatus !== undefined) return new Response('', { status: opts.deleteStatus });
+        objects.delete(key);
+        return new Response(null, { status: 204 });
+      }
+      const o = objects.get(key);
+      return o
+        ? new Response(o.bytes.slice(), { headers: { 'content-type': o.type } })
+        : new Response('', { status: 404 });
+    }),
+  );
+  const store = createBlobStore({ baseUrl: BLOB_BASE, signingKey: 'a2V5' });
+  const putUpload = (filename: string, bytes: Uint8Array): string => {
+    const slot = mintUploadSlot(store, { filename });
+    objects.set(slot.blobKey, { bytes, type: slot.mimeType });
+    return slot.blobKey;
+  };
+  return { store, objects, calls, putUpload };
+}
 
 /** The names every read/download module registers (healthcheck needs the concrete deps). */
 export function readToolRoster(): string[] {
