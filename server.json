@@ -55,7 +55,7 @@
         },
         {
           "name": "INSYNC_INLINE_DOWNLOADS",
-          "description": "true returns downloaded bytes inline (base64) instead of writing to disk — for a hosted runner whose disk the user cannot reach. Default false (disk).",
+          "description": "Local installs: true returns a downloaded file inline (up to 10 MiB) instead of writing it to disk; larger files are still saved. Ignored when hosted, which always delivers inline or by signed link. Default false.",
           "isRequired": false,
           "format": "string"
         },

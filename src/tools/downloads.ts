@@ -31,23 +31,29 @@ function isPresent(row: Record<string, unknown>): boolean {
   return Boolean(row.FileNotExit);
 }
 
-/** Render a completed download: the saved path, inline base64, or a too-large note. */
+/**
+ * Render a completed download: one JSON text block (what was delivered and
+ * how — a saved path, a signed link, or neither) followed by any inline
+ * content blocks (the file itself, as an image or an embedded resource).
+ */
 function downloadResult(outcome: DownloadOutcome): CallToolResult {
-  const file = { file_name: outcome.fileName, mime_type: outcome.mimeType, size_bytes: outcome.size };
-  if (outcome.savedTo !== undefined) {
-    return minifiedResult(tidy({ saved_to: outcome.savedTo, ...file }));
-  }
-  if (outcome.tooLarge === true) {
-    return minifiedResult(
-      tidy({
-        ...file,
-        note:
-          'This file is too large to return inline. Download it on a local install, where it ' +
-          'writes to INSYNC_OUTPUT_DIR (or ~/Downloads).',
-      }),
-    );
-  }
-  return minifiedResult(tidy({ ...file, base64: outcome.base64 }));
+  const meta = minifiedResult(
+    tidy({
+      file_name: outcome.fileName,
+      mime_type: outcome.mimeType,
+      size_bytes: outcome.size,
+      delivered_via: outcome.via,
+      saved_to: outcome.savedTo,
+      url: outcome.url,
+      expires_at: outcome.expiresAt,
+      link_note:
+        outcome.url !== undefined
+          ? 'Give this download link only to the user: anyone holding it can fetch the file until it expires.'
+          : undefined,
+      note: outcome.note,
+    }),
+  );
+  return { ...meta, content: [...meta.content, ...outcome.content] };
 }
 
 export function registerDownloadTools(
@@ -95,9 +101,10 @@ export function registerDownloadTools(
       _meta: healthMeta('other'),
       description:
         'Download one file attached to a secure message. Identify it by the message’s master id ' +
-        'and the attachment’s position (index) from insync_list_attachments. On a local install ' +
-        'the file is saved to disk and the path returned; on a hosted server the bytes come back ' +
-        'inline. The download goes through the portal — never direct storage.',
+        'and the attachment’s position (index) from insync_list_attachments. ' +
+        'On a local install the file is saved to disk and the path returned; on a hosted server ' +
+        'it comes back inline (up to 10 MiB), or as a short-lived signed download link when larger. ' +
+        'The download goes through the portal — never direct storage.',
       annotations: READ,
       inputSchema: z.object({
         master_id: z
@@ -114,7 +121,7 @@ export function registerDownloadTools(
           .optional()
           .describe(
             'Directory to save into (local install only; ignored on a hosted server, which ' +
-              'returns bytes inline). Defaults to INSYNC_OUTPUT_DIR or ~/Downloads; must resolve ' +
+              'returns the file inline or as a link). Defaults to INSYNC_OUTPUT_DIR or ~/Downloads; must resolve ' +
               'inside an allowed root.',
           ),
       }),
@@ -142,7 +149,7 @@ export function registerDownloadTools(
       }
       const res = await client.downloadAttachment(filePath);
       return downloadResult(
-        io.deliver({
+        await io.deliver({
           bytes: res.bytes,
           fileName: fileName || 'attachment',
           mimeType: res.contentType,
@@ -159,9 +166,10 @@ export function registerDownloadTools(
       _meta: healthMeta('other'),
       description:
         'Download a document filed to the patient’s portal account. Identify it by the ' +
-        'folder_url and file_name from insync_list_documents (full view). On a local install the ' +
-        'file is saved to disk and the path returned; on a hosted server the bytes come back ' +
-        'inline. The download goes through the portal — never direct storage.',
+        'folder_url and file_name from insync_list_documents (full view). ' +
+        'On a local install the file is saved to disk and the path returned; on a hosted server ' +
+        'it comes back inline (up to 10 MiB), or as a short-lived signed download link when larger. ' +
+        'The download goes through the portal — never direct storage.',
       annotations: READ,
       inputSchema: z.object({
         folder_url: z
@@ -177,7 +185,7 @@ export function registerDownloadTools(
           .optional()
           .describe(
             'Directory to save into (local install only; ignored on a hosted server, which ' +
-              'returns bytes inline). Defaults to INSYNC_OUTPUT_DIR or ~/Downloads; must resolve ' +
+              'returns the file inline or as a link). Defaults to INSYNC_OUTPUT_DIR or ~/Downloads; must resolve ' +
               'inside an allowed root.',
           ),
       }),
@@ -192,7 +200,7 @@ export function registerDownloadTools(
       }
       const res = await client.downloadFile(source.filePath);
       return downloadResult(
-        io.deliver({
+        await io.deliver({
           bytes: res.bytes,
           fileName: file_name,
           mimeType: res.contentType,

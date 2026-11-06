@@ -97,6 +97,21 @@ it later. The confirm gate, the file vetting and the re-read-after-write guidanc
 are all in place; only the on-the-wire success signal is pending confirmation.
 See [`docs/INSYNC-API.md`](docs/INSYNC-API.md).
 
+Each side of the card arrives by exactly one route: `front_path`/`back_path` (a
+file on this machine — local installs only, refused on a hosted server),
+`front_inline`/`back_inline` (`{filename, contentBase64}`, for a small image), or
+`front_blob_key`/`back_blob_key` — on a hosted server, call `insync_upload_slots`
+for a signed upload URL, PUT the image to it, and pass the returned `blobKey`.
+The uploaded copy is deleted only after the portal accepts the card; a rejection
+or an unconfirmed outcome keeps it.
+
+### Downloads
+
+On a local install a download is written to a private (0600) file and the path
+returned. On a hosted server it comes back inline when it fits (10 MiB), and
+otherwise as a short-lived signed download link from the host's blob store —
+never a path on the runner's disk.
+
 ## Confirm gate
 
 Every write is gated by `@chrischall/mcp-utils`' `confirmWrite`, through its
@@ -104,8 +119,9 @@ Every write is gated by `@chrischall/mcp-utils`' `confirmWrite`, through its
 sends nothing and returns a **preview + a `confirmToken`**; only a second call
 carrying that token — after you approve the preview — sends. The send/request
 tools may read the portal while previewing (to resolve names and check the slot
-or recipient); the upload preview reads nothing. The exact request body (for the
-upload, the image bytes) and the shown preview are bound into the token, so an
+or recipient); the upload preview reads nothing from the portal. The exact request
+body (for the upload, the image bytes) and the shown preview (including each
+image's SHA-256) are bound into the token, so an
 argument, file or portal state that changed since the preview is refused as
 `DRAFT_CHANGED`. `MCP_CONFIRM_MODE` / `MCP_CONFIRM_ELICITATION` tune this (see the
 env table).
@@ -145,7 +161,7 @@ prints a pair code to approve once in the extension popup.
 | `INSYNC_TRANSPORT` | no | auto | `server` or `fetchproxy`. Default: `server` when both credentials are set, else `fetchproxy`. |
 | `INSYNC_WS_PORT` | no | `37149` | fetchproxy concentrator port. The whole fleet shares it; override only when hosting. |
 | `INSYNC_OUTPUT_DIR` | no | `~/Downloads`, `~/Documents` | Where downloaded files are written (a path-delimiter list; `~` expands). A per-call `dest` must resolve inside one of these. |
-| `INSYNC_INLINE_DOWNLOADS` | no | `false` | `true` returns downloaded bytes inline (base64) instead of writing to disk — for a hosted runner whose disk you cannot reach. |
+| `INSYNC_INLINE_DOWNLOADS` | no | `false` | Local installs: `true` returns a downloaded file inline (an MCP content block, up to 10 MiB) instead of writing it to disk; a larger file is still saved to disk. A hosted server (detected from `MCP_DATA_DIR` / the blob store) always delivers inline or by link and ignores this. |
 | `MCP_CONFIRM_MODE` | no | `ask-user` | Confirm-gate mode for every write. `ask-user` = preview + `confirmToken` round-trip; `auto` lets a capable host confirm in one step; an unrecognised value fails closed (`refuse`). |
 | `MCP_CONFIRM_ELICITATION` | no | `on` | `on` lets the host confirm a write interactively; `off` forces the `confirmToken` round-trip. |
 

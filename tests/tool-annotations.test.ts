@@ -57,7 +57,7 @@ async function servedTools() {
 
 describe('tool annotations', () => {
   it('covers the whole served surface', async () => {
-    expect(await servedTools()).toHaveLength(26);
+    expect(await servedTools()).toHaveLength(27);
   });
 
   it('marks every tool open-world', async () => {

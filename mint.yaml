@@ -64,13 +64,14 @@ env:
     help: >-
       Where downloaded files are written (a path-delimiter list; ~ expands).
       Default ~/Downloads and ~/Documents. A per-call dest must resolve inside
-      one of these. Ignored when INSYNC_INLINE_DOWNLOADS is set.
+      one of these. Local installs only: a hosted server never writes a download
+      to disk.
   - name: INSYNC_INLINE_DOWNLOADS
     required: false
     help: >-
-      true returns downloaded bytes inline (base64) instead of writing to disk —
-      the right choice on a hosted runner whose disk the user cannot reach.
-      Default false (disk).
+      Local installs only. Hosted, downloads come back inline (up to 10 MiB) or
+      as a signed link from the host's blob store whatever this says; leave it
+      unset.
   - name: MCP_CONFIRM_MODE
     required: false
     help: >-

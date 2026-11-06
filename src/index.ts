@@ -26,7 +26,7 @@ import { registerDownloadTools } from './tools/downloads.js';
 import { registerInsyncHealthcheckTool } from './tools/healthcheck.js';
 import { registerMessageTools } from './tools/messages.js';
 import { registerProfileTools } from './tools/profile.js';
-import { registerUploadTools, uploadRoots } from './tools/uploads.js';
+import { registerUploadTools } from './tools/uploads.js';
 import { registerComposeTools } from './tools/compose.js';
 import { registerRefillTools } from './tools/refills.js';
 import { registerSchedulingTools } from './tools/scheduling.js';
@@ -95,7 +95,7 @@ await runMcp({
     (server) => registerDocumentTools(server, client),
     (server) => registerProfileTools(server, client),
     (server) => registerDownloadTools(server, client, downloadIO),
-    (server) => registerUploadTools(server, client, { allowedRoots: uploadRoots() }),
+    (server) => registerUploadTools(server, client),
     (server) => registerComposeTools(server, client),
     (server) => registerRefillTools(server, client),
     (server) => registerSchedulingTools(server, client),
