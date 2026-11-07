@@ -196,6 +196,10 @@ page served `200` (`<title>Portal :: Login`), an `{"isTimeout":true}` body, or a
 file transfer and the upload — is documented, keys only (no values, which are
 PHI), in [`docs/INSYNC-API.md`](docs/INSYNC-API.md).
 
+## Upgrading
+
+**0.4.0 — download output.** `insync_download_attachment` and `insync_download_document` no longer return a `base64` field. Inline bytes now arrive as MCP content blocks after the JSON block (an image block for PNG/JPEG/GIF/WebP, otherwise an embedded resource), and the JSON says how the file was delivered: `delivered_via` (`image`, `resource`, `link` or `disk`), plus `saved_to`, or `url` + `expires_at` for a signed link on a hosted server. A file too large to inline is now delivered by link or to disk instead of being replaced by a note. A caller that read `base64` should read the content block instead.
+
 ## License
 
 MIT
