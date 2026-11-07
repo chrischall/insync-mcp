@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.4.0](https://github.com/chrischall/insync-mcp/compare/v0.3.0...v0.4.0) (2026-11-07)
+
+
+### Features
+
+* **files:** upload insurance cards and download files from hosted sessions ([#21](https://github.com/chrischall/insync-mcp/issues/21)) ([6de538b](https://github.com/chrischall/insync-mcp/commit/6de538b91e48e4c5c2c9e67c9918e9c6cad64871))
+
+
+### Bug Fixes
+
+* **deps:** bump node-html-parser ([#19](https://github.com/chrischall/insync-mcp/issues/19)) ([324aff2](https://github.com/chrischall/insync-mcp/commit/324aff2a728ddfc9ca2bbe90a2000d64470458f1))
+* **deps:** upgrade @chrischall/mcp-utils to 3.7.2 so uploads carry only the file's bytes ([#24](https://github.com/chrischall/insync-mcp/issues/24)) ([5cb5d61](https://github.com/chrischall/insync-mcp/commit/5cb5d61ab23104b6e49c4869d18eb6df0ba723f6))
+
+
+### Documentation
+
+* **downloads:** note the download output change for upgraders ([#23](https://github.com/chrischall/insync-mcp/issues/23)) ([530d5b0](https://github.com/chrischall/insync-mcp/commit/530d5b052ee4c26dc5865da1ff250ed24434de0f))
+
 ## [0.3.0](https://github.com/chrischall/insync-mcp/compare/v0.2.2...v0.3.0) (2026-11-04)
 
 
