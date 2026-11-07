@@ -88,9 +88,8 @@ describe('NodeDownloadIO (local disk — unchanged)', () => {
 });
 
 describe('DeliveryLadderIO (hosted: inline, else a signed link)', () => {
-  it('returns a small file inline as a content block, storing nothing', async () => {
-    const blob = fakeBlobStore();
-    const out = await new DeliveryLadderIO({ store: blob.store }).deliver({
+  it('returns a small file inline as a content block when there is no blob store', async () => {
+    const out = await new DeliveryLadderIO({ store: null }).deliver({
       bytes: PDF,
       fileName: 'report.pdf',
       mimeType: 'application/pdf;charset=UTF-8',
@@ -100,7 +99,18 @@ describe('DeliveryLadderIO (hosted: inline, else a signed link)', () => {
     expect(out.content).toHaveLength(1);
     const block = out.content[0] as { resource: { blob: string; mimeType: string } };
     expect(Buffer.from(block.resource.blob, 'base64').toString()).toBe(Buffer.from(PDF).toString());
-    expect(blob.calls).toEqual([]);
+  });
+
+  it('sends a small non-image file as a signed link when a blob store exists (hosted clients reject resource blobs)', async () => {
+    const blob = fakeBlobStore();
+    const out = await new DeliveryLadderIO({ store: blob.store }).deliver({
+      bytes: PDF,
+      fileName: 'report.pdf',
+      mimeType: 'application/pdf',
+    });
+    expect(out.via).toBe('link');
+    expect(out.url?.startsWith(`${BLOB_BASE}/`)).toBe(true);
+    expect(blob.calls.map((c) => c.method)).toEqual(['PUT']);
   });
 
   it('returns an image as an image block', async () => {
@@ -189,7 +199,7 @@ describe('makeDownloadIO', () => {
     expect(io).toBeInstanceOf(DeliveryLadderIO);
     expect((io as DeliveryLadderIO).hasDiskFallback).toBe(false);
     const out = await (io as DeliveryLadderIO).deliver({ bytes: PDF, fileName: 'r.pdf', mimeType: 'application/pdf' });
-    expect(out.via).toBe('resource');
+    expect(out.via).toBe('link');
   });
 
   it('is still the ladder (inline, then a clear refusal) when hosted with no blob store', () => {
