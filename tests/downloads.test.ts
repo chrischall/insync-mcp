@@ -167,7 +167,7 @@ describe('insync_download_attachment', () => {
     }
   });
 
-  it('returns a small file inline as a content block on a hosted server', async () => {
+  it('returns a small non-image file as a signed link on a hosted server', async () => {
     const blob = fakeBlobStore();
     const { handlers } = setup({
       responder: () => okJson(ATTACHMENTS),
@@ -175,17 +175,15 @@ describe('insync_download_attachment', () => {
       io: new DeliveryLadderIO({ store: blob.store }),
     });
     const res = (await handlers.get('insync_download_attachment')!({ master_id: '9001', index: 0 })) as {
-      content: { type: string; resource?: { blob: string; mimeType: string } }[];
+      content: unknown[];
     };
     const out = JSON.parse(textOf(res));
     expect(out.saved_to).toBeUndefined();
-    expect(out.delivered_via).toBe('resource');
+    expect(out.delivered_via).toBe('link');
+    expect(out.url.startsWith(`${BLOB_BASE}/`)).toBe(true);
     expect(out.base64).toBeUndefined();
-    const block = res.content[1]!;
-    expect(block.type).toBe('resource');
-    expect(block.resource!.mimeType).toBe('application/pdf');
-    expect(Buffer.from(block.resource!.blob, 'base64').toString()).toBe('PDFBYTES');
-    expect(blob.calls).toEqual([]);
+    expect(res.content).toHaveLength(1);
+    expect(blob.calls.map((c) => c.method)).toEqual(['PUT']);
   });
 
   it('hands back a signed download link for an over-cap file on a hosted server', async () => {

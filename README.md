@@ -108,9 +108,9 @@ or an unconfirmed outcome keeps it.
 ### Downloads
 
 On a local install a download is written to a private (0600) file and the path
-returned. On a hosted server it comes back inline when it fits (10 MiB), and
-otherwise as a short-lived signed download link from the host's blob store —
-never a path on the runner's disk.
+returned. On a hosted server an image comes back inline when it fits (10 MiB);
+any other file, and an image over that size, comes back as a short-lived signed
+download link from the host's blob store — never a path on the runner's disk.
 
 ## Confirm gate
 
