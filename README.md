@@ -40,6 +40,13 @@ Not built: message attachments and patient signatures on messages, the
 "flexible window" appointment request, withdrawing a request, payments, and
 form submission.
 
+## Reading a message
+
+`insync_get_message` returns the body as plain text by default: lines, numbered
+items and link targets kept. `format: "markdown"` keeps bold, lists, tables and
+links with their text as well. Either way, text the sender hid from view
+(`display:none`) is dropped. Messages you send are plain text.
+
 ## Two ways to authenticate
 
 | Mode | When | Credentials held |
