@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/chrischall/insync-mcp/compare/v0.4.0...v0.5.0) (2026-11-11)
+
+
+### Features
+
+* **messages:** read message bodies as Markdown, keeping lines, lists and links ([#25](https://github.com/chrischall/insync-mcp/issues/25)) ([4a848a0](https://github.com/chrischall/insync-mcp/commit/4a848a04682cca76b57fc1e3950201fdce4bbf7d))
+
 ## [0.4.0](https://github.com/chrischall/insync-mcp/compare/v0.3.0...v0.4.0) (2026-11-07)
 
 
