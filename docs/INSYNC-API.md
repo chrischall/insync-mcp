@@ -130,14 +130,15 @@ data[].IsFromPatient         # -> fromPatient
 `GET Messages/GetMessageDetail?toDoChildId=<id>&todoMasaterId=<id>&type=inbox`.
 **Opening an UNREAD message probably marks it read** (visible to the practice, no
 inverse); the tool checks the unread list first and refuses to fetch the detail
-unless `allow_mark_read` is set. Body HTML is run through `htmlToReadableText`.
+unless `allow_mark_read` is set. Body HTML is read with `@chrischall/mcp-utils/rich` (`src/tools/_body.ts`):
+plain text by default, Markdown on `format: "markdown"`, hidden content dropped.
 
 ```
 PracticeName                        # -> practice
 MessageDetail.TaskSubject           # -> subject
 MessageDetail.CreatedOnText         # -> date
 MessageDetail.PatientName           # -> patient
-MessageDetail.TaskMessage           # -> body (HTML -> readable text)
+MessageDetail.TaskMessage           # -> body (HTML -> text or Markdown)
 MessageAttachments[].FileName       # -> attachment name
 MessageAttachments[].FilePath       # a session URL — NEVER returned
 ```

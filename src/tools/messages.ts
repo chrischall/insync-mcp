@@ -1,9 +1,9 @@
 import { z } from 'zod';
 import { stripUrlishKeys, untrustedResult } from '@chrischall/mcp-utils';
-import { htmlToReadableText } from '@chrischall/mcp-utils/html';
 import type { McpServer } from '@modelcontextprotocol/server';
 import type { InsyncClient, MessageFolder } from '../client.js';
 import { READ, asRecord, asRecordArray, tidy } from './_shared.js';
+import { BODY_FORMATS, readMessageBody } from './_body.js';
 import {
   ASSEMBLED_VIEWS,
   assembledViewArg,
@@ -134,8 +134,8 @@ export function registerMessageTools(server: McpServer, client: InsyncClient): v
       // tool refuses to open an unread message unless allow_mark_read is set,
       // returning the list-row metadata and the warning instead.
       description:
-        'Read one secure message in full (subject, sent date, body as plain text, attachment ' +
-        'list). WARNING: opening an UNREAD message marks it read in the portal — the ' +
+        'Read one secure message in full (subject, sent date, body as plain text or Markdown, ' +
+        'attachment list). WARNING: opening an UNREAD message marks it read in the portal — the ' +
         'practice can see that, and it cannot be undone. An unread message is NOT opened unless ' +
         'allow_mark_read is true; without it the tool returns the message’s metadata and a ' +
         'note asking you to confirm with the user first. An already-read message is opened freely.',
@@ -153,10 +153,17 @@ export function registerMessageTools(server: McpServer, client: InsyncClient): v
           .describe(
             'Set true ONLY after the user agrees to let an unread message be marked read. Default false.',
           ),
+        format: z
+          .enum(BODY_FORMATS)
+          .optional()
+          .describe(
+            'How the body reads: "text" (default; lines, numbered items and link targets kept) or ' +
+              '"markdown" (also keeps bold, lists, tables and links with their text).',
+          ),
         view: assembledViewArg(),
       }),
     },
-    async ({ child_id, master_id, allow_mark_read, view }) => {
+    async ({ child_id, master_id, allow_mark_read, format, view }) => {
       if (!allow_mark_read) {
         // Throws (fails closed) when the unread folder is too long to tell.
         const match = await client.findUnreadMessage(child_id, master_id);
@@ -190,7 +197,7 @@ export function registerMessageTools(server: McpServer, client: InsyncClient): v
             subject: detail.TaskSubject,
             sent: detail.CreatedOnText ?? detail.CreatedOn,
             patient: detail.PatientName,
-            body: htmlToReadableText(typeof detail.TaskMessage === 'string' ? detail.TaskMessage : ''),
+            body: readMessageBody(typeof detail.TaskMessage === 'string' ? detail.TaskMessage : '', format),
             attachments: Array.isArray(attachments)
               ? asRecordArray(attachments).map((a) => stripUrlishKeys(a))
               : undefined,
