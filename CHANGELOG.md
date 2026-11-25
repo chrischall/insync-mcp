@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.1](https://github.com/chrischall/insync-mcp/compare/v0.5.0...v0.5.1) (2026-11-25)
+
+
+### Bug Fixes
+
+* **deps:** bump the production-dependencies group with 2 updates ([#28](https://github.com/chrischall/insync-mcp/issues/28)) ([6f019ee](https://github.com/chrischall/insync-mcp/commit/6f019eea1f99421d4c88a7d380e58bd7ddf63cdc))
+* **deps:** bump the production-dependencies group with 3 updates ([#30](https://github.com/chrischall/insync-mcp/issues/30)) ([966bdb3](https://github.com/chrischall/insync-mcp/commit/966bdb3c9a649438461294fdb4f8fef64e09e6e2))
+
 ## [0.5.0](https://github.com/chrischall/insync-mcp/compare/v0.4.0...v0.5.0) (2026-11-11)
 
 
